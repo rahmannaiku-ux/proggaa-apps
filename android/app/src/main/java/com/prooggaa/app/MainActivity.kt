@@ -155,6 +155,10 @@ class MainActivity : ComponentActivity() {
         webView.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
+                Site.browserTarget(url)?.let {
+                    openInBrowser(it)
+                    return true
+                }
                 if (url.startsWith(Site.CHECK_UPDATE_URL)) {
                     updater.check(manual = true)
                     return true
@@ -284,6 +288,22 @@ class MainActivity : ComponentActivity() {
             startActivity(intent.addCategory(Intent.CATEGORY_BROWSABLE))
         } catch (_: ActivityNotFoundException) {
             Toast.makeText(this, "No app can open this link.", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /**
+     * Opens a prooggaa.com page in the phone's browser. The selector makes Android
+     * pick a browser, not this app (which also opens prooggaa.com links).
+     */
+    private fun openInBrowser(url: String) {
+        val intent = Intent(Intent.ACTION_VIEW, Uri.parse(url))
+            .addCategory(Intent.CATEGORY_BROWSABLE)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        intent.selector = Intent.makeMainSelectorActivity(Intent.ACTION_MAIN, Intent.CATEGORY_APP_BROWSER)
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            Toast.makeText(this, "Open prooggaa.com in your browser to do this.", Toast.LENGTH_LONG).show()
         }
     }
 

@@ -28,6 +28,12 @@ new release. A release is only needed when the app itself changes (updater, noti
   see `src/lib/apps.ts` in the website). It's only used to choose what to show, never for access.
 - **"Check for updates" link:** a link to `proggaa://update` (on the site's /download and Settings pages, shown only
   inside the app) makes either app check straight away.
+- **Open in the browser:** a link to `proggaa://browser?url=<https address>` opens that page in the normal browser
+  instead of the app. Only `https` addresses are accepted. The site uses it for buying a mission: **paid missions are
+  bought on the website, not in the apps**, so a mission's page in the app shows a "Buy on prooggaa.com" button instead
+  of checkout. Free missions can still be joined in the app.
+- **No landing page:** the apps open at `/dashboard`, which goes to the login screen when signed out. The site sends
+  the apps from `/` to `/login` (or `/dashboard` when signed in), so they never show the marketing home page.
 - **Offline:** the Windows app opens on a small local page (`desktop/dist/index.html`) that waits for a connection
   before opening the site. Android shows an offline screen with **Try again**.
 
@@ -106,11 +112,11 @@ somewhere safe and private (never in this repo; `.gitignore` blocks key files).
 
 | Key | On the release computer | GitHub secret |
 |---|---|---|
-| Windows updater key (minisign) | `%USERPROFILE%\.tauri\proggaa-updater.key` (+ `.password`, `.key.pub`) | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
-| Android signing keystore (PKCS#12, alias `proggaa`) | `%USERPROFILE%\.proggaa-android\proggaa-release.p12` (+ `keystore.password`, `cert.pem`) | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` |
+| Windows updater key (minisign) | `D:\proggaa-keys\tauri\proggaa-updater.key` (+ `.password`, `.key.pub`) | `TAURI_SIGNING_PRIVATE_KEY`, `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` |
+| Android signing keystore (PKCS#12, alias `proggaa`) | `D:\proggaa-keys\android\proggaa-release.p12` (+ `keystore.password`, `cert.pem`) | `ANDROID_KEYSTORE_BASE64`, `ANDROID_KEYSTORE_PASSWORD` |
 
 The Windows public key is in `desktop/src-tauri/tauri.conf.json`. The Android certificate's SHA-256 fingerprint is in
-`%USERPROFILE%\.proggaa-android\cert-sha256.txt`. The release workflow checks every APK is signed by `CN=Proggaa`.
+`D:\proggaa-keys\android\cert-sha256.txt`. The release workflow checks every APK is signed by `CN=Proggaa`.
 
 To put a key into GitHub again: `gh secret set TAURI_SIGNING_PRIVATE_KEY < proggaa-updater.key`, and for Android
 `base64 -w0 proggaa-release.p12 | gh secret set ANDROID_KEYSTORE_BASE64`.

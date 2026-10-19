@@ -1,6 +1,7 @@
 package com.prooggaa.app
 
 import java.net.URI
+import java.net.URLDecoder
 
 /** Where the app points, and the small rules about links that are easy to get wrong. */
 object Site {
@@ -13,6 +14,19 @@ object Site {
 
     /** A link the site shows (on /download, inside the app) to ask for an update check now. */
     const val CHECK_UPDATE_URL = "proggaa://update"
+
+    /**
+     * `proggaa://browser?url=<https address>`: the site asks for a page to open in
+     * the person's normal browser (e.g. buying a mission, done on the website).
+     * Returns that address, or null when the link isn't one of these.
+     */
+    fun browserTarget(url: String): String? {
+        val uri = runCatching { URI(url) }.getOrNull() ?: return null
+        if (uri.scheme != "proggaa" || uri.host != "browser") return null
+        val raw = uri.rawQuery?.split("&")?.firstOrNull { it.startsWith("url=") }?.removePrefix("url=") ?: return null
+        val target = runCatching { URLDecoder.decode(raw, "UTF-8") }.getOrNull() ?: return null
+        return if (runCatching { URI(target).scheme }.getOrNull() == "https") target else null
+    }
 
     /** New, unread notifications for the signed-in person (see the website's /api/app/notifications). */
     const val NOTIFICATIONS_API = "$BASE/api/app/notifications"

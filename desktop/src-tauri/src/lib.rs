@@ -7,6 +7,7 @@
 
 use std::time::Duration;
 
+use tauri::webview::NewWindowResponse;
 use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
@@ -19,6 +20,17 @@ pub const SITE: &str = "https://prooggaa.com";
 /// A link the site uses (on /download, when it sees it is inside the app)
 /// to ask the app to look for an update now.
 const CHECK_UPDATE_URL: &str = "proggaa://update";
+
+/// `proggaa://browser?url=<https address>`: the site asks for a page to open in
+/// the person's normal browser (e.g. buying a mission, which is done on the website).
+pub fn browser_target(url: &Url) -> Option<String> {
+    if url.scheme() != "proggaa" || url.host_str() != Some("browser") {
+        return None;
+    }
+    let target = url.query_pairs().find(|(k, _)| k == "url")?.1.into_owned();
+    let parsed = Url::parse(&target).ok()?;
+    (parsed.scheme() == "https").then_some(target)
+}
 
 /// Wait this long after launch before the first update check, so it never
 /// slows the site down while it loads.
@@ -70,14 +82,22 @@ pub fn run() {
             let handle = app.handle().clone();
             let version = app.package_info().version.to_string();
             let nav_handle = handle.clone();
+            let popup_handle = handle.clone();
 
             WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Proggaa")
-                .inner_size(1280.0, 820.0)
+                // Opens maximized the first time; after that the window-state plugin
+                // brings back the size and position it was closed at.
+                .inner_size(1200.0, 760.0)
                 .min_inner_size(420.0, 560.0)
                 .center()
+                .maximized(true)
                 .user_agent(&user_agent(&version))
                 .on_navigation(move |url| {
+                    if let Some(target) = browser_target(url) {
+                        let _ = nav_handle.opener().open_url(target, None::<&str>);
+                        return false;
+                    }
                     if url.as_str().starts_with(CHECK_UPDATE_URL) {
                         let app = nav_handle.clone();
                         tauri::async_runtime::spawn(async move { check_for_update(&app, true).await });
@@ -90,6 +110,17 @@ pub fn run() {
                         let _ = nav_handle.opener().open_url(url.as_str(), None::<&str>);
                     }
                     false
+                })
+                // target="_blank" links and window.open: pages of the site (a full-size picture,
+                // a file) open in a second app window that shares the sign-in; the rest in the browser.
+                .on_new_window(move |url, _features| {
+                    if opens_in_app(&url) {
+                        return NewWindowResponse::Allow;
+                    }
+                    if matches!(url.scheme(), "http" | "https" | "mailto" | "tel") {
+                        let _ = popup_handle.opener().open_url(url.as_str(), None::<&str>);
+                    }
+                    NewWindowResponse::Deny
                 })
                 .build()?;
 
@@ -233,6 +264,19 @@ mod tests {
         assert!(!opens("https://evilprooggaa.com/"));
         assert!(!opens("mailto:hi@prooggaa.com"));
         assert!(!opens("proggaa://update"));
+    }
+
+    #[test]
+    fn opens_website_only_pages_in_the_browser() {
+        let target = |u: &str| browser_target(&Url::parse(u).unwrap());
+        assert_eq!(
+            target("proggaa://browser?url=https%3A%2F%2Fprooggaa.com%2Fcourses%2Ffull-stack").as_deref(),
+            Some("https://prooggaa.com/courses/full-stack")
+        );
+        assert_eq!(target("proggaa://browser?url=javascript%3Aalert(1)"), None);
+        assert_eq!(target("proggaa://browser?url=file%3A%2F%2F%2FC%3A%2Fx"), None);
+        assert_eq!(target("proggaa://update"), None);
+        assert_eq!(target("https://prooggaa.com/"), None);
     }
 
     #[test]

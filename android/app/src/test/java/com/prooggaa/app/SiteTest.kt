@@ -35,6 +35,18 @@ class SiteTest {
     }
 
     @Test
+    fun websiteOnlyPagesOpenInTheBrowser() {
+        assertEquals(
+            "https://prooggaa.com/courses/full-stack",
+            Site.browserTarget("proggaa://browser?url=https%3A%2F%2Fprooggaa.com%2Fcourses%2Ffull-stack"),
+        )
+        assertNull(Site.browserTarget("proggaa://browser?url=javascript%3Aalert(1)"))
+        assertNull(Site.browserTarget("proggaa://browser?url=intent%3A%2F%2Fx"))
+        assertNull(Site.browserTarget("proggaa://update"))
+        assertNull(Site.browserTarget("https://prooggaa.com/"))
+    }
+
+    @Test
     fun versionCodes() {
         assertEquals(10000, Site.versionCode("1.0.0"))
         assertEquals(10203, Site.versionCode("v1.2.3"))
