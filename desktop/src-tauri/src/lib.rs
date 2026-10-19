@@ -47,6 +47,29 @@ const FIRST_CHECK_AFTER: Duration = Duration::from_secs(10);
 /// Look again this often while the app stays open.
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 
+/// The title bar's colour: the site's sidebar purple (#271643, as 0x00BBGGRR),
+/// so the top of the window reads as part of the app rather than a black strip.
+#[cfg(windows)]
+const TITLE_BAR_COLOR: u32 = 0x0043_1627;
+
+/// Paints the Windows title bar in the sidebar's purple with white text
+/// (Windows 11; older Windows keeps a dark title bar).
+#[cfg(windows)]
+fn paint_title_bar(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+    let Ok(hwnd) = window.hwnd() else { return };
+    let set = |attribute: i32, value: u32| unsafe {
+        DwmSetWindowAttribute(hwnd.0 as _, attribute as _, &value as *const u32 as _, 4);
+    };
+    // Light minimise/maximise/close buttons, whatever the Windows theme.
+    set(DWMWA_USE_IMMERSIVE_DARK_MODE as i32, 1);
+    set(DWMWA_CAPTION_COLOR as i32, TITLE_BAR_COLOR);
+    set(DWMWA_BORDER_COLOR as i32, TITLE_BAR_COLOR);
+    set(DWMWA_TEXT_COLOR as i32, 0x00FF_FFFF);
+}
+
 /// Where the app's own window may go. Anything else (YouTube, Facebook, a
 /// link in a post...) opens in the person's normal browser instead.
 pub fn opens_in_app(url: &Url) -> bool {
@@ -95,7 +118,7 @@ pub fn run() {
             let nav_handle = handle.clone();
             let popup_handle = handle.clone();
 
-            WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
+            let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
                 .title("Proggaa")
                 // Opens maximized the first time; after that the window-state plugin
                 // brings back the size and position it was closed at.
@@ -134,6 +157,10 @@ pub fn run() {
                     NewWindowResponse::Deny
                 })
                 .build()?;
+            #[cfg(windows)]
+            paint_title_bar(&main);
+            #[cfg(not(windows))]
+            let _ = main;
 
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(FIRST_CHECK_AFTER).await;
