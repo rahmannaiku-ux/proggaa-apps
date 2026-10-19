@@ -75,6 +75,11 @@ class AppUpdater(private val activity: ComponentActivity) {
     private fun fetchRelease(): Release = fetchLatestRelease()
 
     companion object {
+        private const val KEY_LAST_CHECK = "lastCheck"
+        private const val KEY_SNOOZE_PREFIX = "snooze-"
+        private const val AUTO_CHECK_EVERY_MS = 30 * 60 * 1000L
+        private const val SNOOZE_MS = 24 * 60 * 60 * 1000L
+
         /** The newest release's manifest (also used by NotificationWorker to announce updates). */
         fun fetchLatestRelease(): Release {
         val conn = (URL(Site.UPDATE_MANIFEST).openConnection() as HttpURLConnection).apply {
@@ -212,10 +217,4 @@ class AppUpdater(private val activity: ComponentActivity) {
 
     private fun toast(text: String) = Toast.makeText(activity, text, Toast.LENGTH_LONG).show()
 
-    private companion object {
-        const val KEY_LAST_CHECK = "lastCheck"
-        const val KEY_SNOOZE_PREFIX = "snooze-"
-        const val AUTO_CHECK_EVERY_MS = 30 * 60 * 1000L
-        const val SNOOZE_MS = 24 * 60 * 60 * 1000L
-    }
 }
