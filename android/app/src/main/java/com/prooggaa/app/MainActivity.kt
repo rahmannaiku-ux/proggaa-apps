@@ -78,6 +78,12 @@ class MainActivity : ComponentActivity() {
     private val tabs = arrayOfNulls<WebView>(Site.TABS.size)
     private var current = 0
     private var keyboardOpen = false
+    /** Whether each tab's page has drawn at least once (until then a loading screen covers it). */
+    private val drawn = BooleanArray(Site.TABS.size)
+    /** The colour of the page being shown, so new tabs and the loading screen match it (light or dark). */
+    private var pageColor = 0
+    private lateinit var tabLoading: View
+    private var preloadStarted = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var fullscreenView: View? = null
@@ -124,9 +130,19 @@ class MainActivity : ComponentActivity() {
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.TRANSPARENT)
         }
         offline = buildOfflineView()
+        pageColor = ContextCompat.getColor(this, R.color.proggaa_bg)
+        tabLoading = FrameLayout(this).apply {
+            isVisible = false
+            isClickable = true
+            setBackgroundColor(pageColor)
+            addView(ProgressBar(context).apply {
+                indeterminateTintList = ContextCompat.getColorStateList(context, R.color.proggaa_accent)
+            }, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
+        }
         tabBar = TabBar(this) { index, reselected -> onTabSelected(index, reselected) }.apply { isVisible = false }
 
         content.addView(progress, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP))
+        content.addView(tabLoading, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         content.addView(offline, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -226,8 +242,26 @@ class MainActivity : ComponentActivity() {
         next.requestFocus()
         progress.isVisible = false
         offline.isVisible = false
+        // A tab that hasn't drawn yet shows a calm loading screen in the page's colour, never a blank one.
+        tabLoading.setBackgroundColor(pageColor)
+        tabLoading.isVisible = !drawn[index]
         updateTabBarVisibility()
-        matchBarsToPage()
+        if (drawn[index]) matchBarsToPage()
+    }
+
+    /**
+     * Once signed in and the first page is up, quietly loads the other tabs one
+     * by one, so switching to them is instant.
+     */
+    private fun preloadTabs() {
+        if (preloadStarted) return
+        preloadStarted = true
+        lifecycleScope.launch {
+            for (i in tabs.indices) {
+                delay(PRELOAD_GAP_MS)
+                if (tabs[i] == null && tabBar.isVisible) tabFor(i)
+            }
+        }
     }
 
     private fun onTabSelected(index: Int, reselected: Boolean) {
@@ -260,7 +294,10 @@ class MainActivity : ComponentActivity() {
             }
             tabs[i] = null
         }
-        for (i in tabs.indices) tabBar.setBadge(i, 0)
+        for (i in tabs.indices) {
+            tabBar.setBadge(i, 0)
+            if (i != current) drawn[i] = false
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -270,7 +307,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun newWebView(): WebView {
         val web = WebView(this)
-        web.setBackgroundColor(ContextCompat.getColor(this, R.color.proggaa_bg))
+        web.setBackgroundColor(pageColor)
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true) // YouTube lesson videos
         // The site scrolls itself; no Android glow at the edges of the page.
         web.overScrollMode = View.OVER_SCROLL_NEVER
@@ -319,7 +356,19 @@ class MainActivity : ComponentActivity() {
                 progress.postDelayed(showProgress, PROGRESS_DELAY_MS)
             }
 
+            override fun onPageCommitVisible(view: WebView, url: String?) {
+                val index = tabs.indexOfFirst { it === view }
+                if (index < 0) return
+                drawn[index] = true
+                if (index == current) {
+                    tabLoading.isVisible = false
+                    firstPageShown = true
+                    matchBarsToPage()
+                }
+            }
+
             override fun onPageFinished(view: WebView, url: String?) {
+                tabs.indexOfFirst { it === view }.takeIf { it >= 0 }?.let { drawn[it] = true }
                 CookieManager.getInstance().flush()
                 if (view !== tabs[current]) return
                 progress.removeCallbacks(showProgress)
@@ -393,8 +442,13 @@ class MainActivity : ComponentActivity() {
     /** After every page change in the open tab: tab bar, bar colours, badges, and sign-out. */
     private fun pageChanged(url: String?) {
         val path = Site.pathOf(url)
-        if (path == "/login" || path == "/register") forgetOtherTabs()
+        if (path == "/login" || path == "/register") {
+            forgetOtherTabs()
+            preloadStarted = false
+        }
+        tabLoading.isVisible = false
         updateTabBarVisibility()
+        if (tabBar.isVisible) preloadTabs()
         matchBarsToPage()
         if (tabBar.isVisible && SystemClock.uptimeMillis() - lastBadgeCheck > 20_000) refreshBadges()
     }
@@ -545,6 +599,7 @@ class MainActivity : ComponentActivity() {
             val match = Regex("""rgba?\((\d+),\s*(\d+),\s*(\d+)""").find(raw ?: return@evaluateJavascript) ?: return@evaluateJavascript
             val (r, g, b) = match.destructured
             val color = Color.rgb(r.toInt(), g.toInt(), b.toInt())
+            pageColor = color
             setBarsColor(color)
             tabBar.setPageColor(color)
         }
@@ -663,6 +718,7 @@ class MainActivity : ComponentActivity() {
         private const val SPLASH_MAX_MS = 4000L
         private const val PROGRESS_DELAY_MS = 350L
         private const val BADGE_EVERY_MS = 60_000L
+        private const val PRELOAD_GAP_MS = 900L
 
         /** Read by NotificationWorker: while the app is open the site shows notifications itself. */
         @Volatile
