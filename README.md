@@ -28,6 +28,8 @@ new release. A release is only needed when the app itself changes (updater, noti
   see `src/lib/apps.ts` in the website). It's only used to choose what to show, never for access.
 - **"Check for updates" link:** a link to `proggaa://update` (on the site's /download and Settings pages, shown only
   inside the app) makes either app check straight away.
+- **Notification settings link (Android 1.0.9+):** a link to `proggaa://notifications` (the site's Settings page)
+  asks for notification permission, or opens the phone's notification settings for Proggaa.
 - **Open in the browser:** a link to `proggaa://browser?url=<https address>` opens that page in the normal browser
   instead of the app. Only `https` addresses are accepted. The site uses it for buying a mission: **paid missions are
   bought on the website, not in the apps**, so a mission's page in the app shows a "Buy on prooggaa.com" button instead
@@ -73,7 +75,9 @@ It is built to feel like a native app rather than a website in a frame:
   `GET /api/app/notifications?after=…` with the web view's session cookie and shows new unread notifications. Tapping one
   opens its page. A notification the site updates in place (for example, more messages in the same chat) replaces the
   old one. While the app is open the site shows notifications itself, so the job stays quiet.
-- Android 13+ asks for notification permission on first launch.
+- Once signed in, if notifications are off, the app explains them in its own dialog ("Turn on notifications?").
+  "Turn on" shows Android 13+'s permission question, or, once that has been refused for good (or on older Android and
+  phones that keep new apps quiet), opens the phone's notification settings for Proggaa. "Not now" waits three days.
 
 ## Building on your computer
 

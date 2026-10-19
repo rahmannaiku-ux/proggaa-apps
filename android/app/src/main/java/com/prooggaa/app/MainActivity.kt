@@ -13,6 +13,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Environment
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -104,6 +105,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
+    private var notificationPromptShown = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition {
@@ -169,11 +171,7 @@ class MainActivity : ComponentActivity() {
             webView.loadUrl(pageFromIntent(intent) ?: Site.START)
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
-            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
-        ) {
-            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
-        }
+        // (Notifications are offered once the person is signed in: see offerNotifications.)
         // (The automatic update check runs in onResume, every time the app comes to the front.)
         if (intent?.getBooleanExtra(EXTRA_CHECK_UPDATE, false) == true) updater.check(manual = true)
     }
@@ -251,6 +249,10 @@ class MainActivity : ComponentActivity() {
                 }
                 if (url.startsWith(Site.CHECK_UPDATE_URL)) {
                     updater.check(manual = true)
+                    return true
+                }
+                if (url.startsWith(Site.NOTIFICATIONS_URL)) {
+                    turnOnNotifications()
                     return true
                 }
                 if (!request.isForMainFrame || Site.opensInApp(url)) return false
@@ -351,6 +353,69 @@ class MainActivity : ComponentActivity() {
         updateTabBarVisibility()
         matchBarsToPage()
         if (tabBar.isVisible && SystemClock.uptimeMillis() - lastBadgeCheck > 20_000) refreshBadges()
+        if (tabBar.isVisible) offerNotifications()
+    }
+
+    // ---------------------------------------------------------------------
+    // Notifications
+    // ---------------------------------------------------------------------
+
+    /**
+     * Once signed in, if notifications are off: explains them and offers to
+     * turn them on (at most once per opening; after "Not now", again in a few days).
+     */
+    private fun offerNotifications() {
+        if (notificationPromptShown || Notifications.allowed(this)) return
+        val prefs = getSharedPreferences(NOTIFICATION_PREFS, MODE_PRIVATE)
+        if (System.currentTimeMillis() < prefs.getLong(KEY_ASK_AGAIN_AT, 0)) return
+        notificationPromptShown = true
+        lifecycleScope.launch {
+            delay(NOTIFICATION_PROMPT_DELAY_MS)
+            if (isFinishing || Notifications.allowed(this@MainActivity)) return@launch
+            NotificationPrompt(
+                this@MainActivity,
+                onTurnOn = { turnOnNotifications() },
+                onLater = {
+                    prefs.edit().putLong(KEY_ASK_AGAIN_AT, System.currentTimeMillis() + ASK_AGAIN_AFTER_MS).apply()
+                },
+            ).show()
+        }
+    }
+
+    /**
+     * Android 13+ asks with its own question the first times; once that has
+     * been refused for good (or on phones that keep new apps quiet, or older
+     * Android), the phone's notification settings for Proggaa open instead.
+     */
+    private fun turnOnNotifications() {
+        if (Notifications.allowed(this)) {
+            openNotificationSettings()
+            return
+        }
+        val prefs = getSharedPreferences(NOTIFICATION_PREFS, MODE_PRIVATE)
+        val needsPermission = Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+        val canAsk = needsPermission && (!prefs.getBoolean(KEY_PERMISSION_ASKED, false) ||
+            shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS))
+        if (canAsk) {
+            prefs.edit().putBoolean(KEY_PERMISSION_ASKED, true).apply()
+            askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            openNotificationSettings()
+        }
+    }
+
+    private fun openNotificationSettings() {
+        val intent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_APP_PACKAGE, packageName)
+        } else {
+            Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName"))
+        }
+        try {
+            startActivity(intent)
+        } catch (_: ActivityNotFoundException) {
+            startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:$packageName")))
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -605,6 +670,11 @@ class MainActivity : ComponentActivity() {
         private const val SPLASH_MAX_MS = 4000L
         private const val PROGRESS_DELAY_MS = 350L
         private const val BADGE_EVERY_MS = 60_000L
+        private const val NOTIFICATION_PREFS = "notification-prompt"
+        private const val KEY_ASK_AGAIN_AT = "askAgainAt"
+        private const val KEY_PERMISSION_ASKED = "permissionAsked"
+        private const val NOTIFICATION_PROMPT_DELAY_MS = 1500L
+        private const val ASK_AGAIN_AFTER_MS = 3 * 24 * 60 * 60 * 1000L
 
 
         /** Read by NotificationWorker: while the app is open the site shows notifications itself. */

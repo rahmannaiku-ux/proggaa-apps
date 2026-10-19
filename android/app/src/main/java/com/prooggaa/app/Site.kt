@@ -14,6 +14,8 @@ object Site {
 
     /** A link the site shows (on /download, inside the app) to ask for an update check now. */
     const val CHECK_UPDATE_URL = "proggaa://update"
+    /** The site's "Notification settings" button: turn notifications on. */
+    const val NOTIFICATIONS_URL = "proggaa://notifications"
 
     /**
      * `proggaa://browser?url=<https address>`: the site asks for a page to open in
