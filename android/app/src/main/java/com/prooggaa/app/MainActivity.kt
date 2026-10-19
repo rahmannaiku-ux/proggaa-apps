@@ -184,7 +184,8 @@ class MainActivity : ComponentActivity() {
         ) {
             askNotifications.launch(Manifest.permission.POST_NOTIFICATIONS)
         }
-        updater.check(manual = false)
+        // (The automatic update check runs in onResume, every time the app comes to the front.)
+        if (intent?.getBooleanExtra(EXTRA_CHECK_UPDATE, false) == true) updater.check(manual = true)
     }
 
     // ---------------------------------------------------------------------
@@ -597,6 +598,10 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        if (intent.getBooleanExtra(EXTRA_CHECK_UPDATE, false)) {
+            updater.check(manual = true)
+            return
+        }
         val page = pageFromIntent(intent) ?: return
         val index = Site.tabFor(Site.pathOf(page) ?: "/")
         val web = tabFor(index, initialUrl = null)
@@ -609,6 +614,7 @@ class MainActivity : ComponentActivity() {
         inForeground = true
         tabs.forEach { it?.onResume() }
         updater.onResume()
+        updater.check(manual = false)
         startBadgeLoop()
     }
 
@@ -642,6 +648,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        /** Set by the "update available" notification: open the update prompt. */
+        const val EXTRA_CHECK_UPDATE = "checkUpdate"
         private const val KEY_CURRENT = "tab"
         private const val KEY_TAB = "tab-state-"
         private const val SPLASH_MAX_MS = 4000L

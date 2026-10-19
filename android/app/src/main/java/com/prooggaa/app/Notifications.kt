@@ -17,6 +17,7 @@ object Notifications {
     const val CHANNEL_UPDATES = "updates"
     private const val GROUP = "proggaa"
     private const val SUMMARY_ID = 1
+    private const val UPDATE_ID = 2
 
     fun createChannels(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
@@ -37,6 +38,30 @@ object Notifications {
         (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED) &&
             NotificationManagerCompat.from(context).areNotificationsEnabled()
+
+    /** "Proggaa x.y.z is ready": tapping it opens the app's update prompt. */
+    fun showUpdate(context: Context, version: String, notes: String) {
+        if (!allowed(context)) return
+        val open = Intent(context, MainActivity::class.java)
+            .putExtra(MainActivity.EXTRA_CHECK_UPDATE, true)
+            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val pending = PendingIntent.getActivity(context, UPDATE_ID, open, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val text = notes.trim().ifEmpty { "Tap to update. It takes a few seconds." }
+        val notification = NotificationCompat.Builder(context, CHANNEL_GENERAL)
+            .setSmallIcon(R.drawable.ic_stat_proggaa)
+            .setColor(ContextCompat.getColor(context, R.color.proggaa_primary))
+            .setContentTitle("Proggaa $version is ready")
+            .setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setContentIntent(pending)
+            .setAutoCancel(true)
+            .build()
+        try {
+            NotificationManagerCompat.from(context).notify(UPDATE_ID, notification)
+        } catch (_: SecurityException) {
+            // Permission was withdrawn between the check and now.
+        }
+    }
 
     /**
      * Shows one Proggaa notification. `key` is the site's notification id, so a

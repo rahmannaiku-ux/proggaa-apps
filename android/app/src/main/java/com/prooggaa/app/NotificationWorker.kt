@@ -27,6 +27,7 @@ import java.util.concurrent.TimeUnit
 class NotificationWorker(context: Context, params: WorkerParameters) : CoroutineWorker(context, params) {
 
     override suspend fun doWork(): Result {
+        announceUpdate()
         val cookies = withContext(Dispatchers.Main) { CookieManager.getInstance().getCookie(Site.BASE) }
         if (cookies == null || !cookies.contains("proggaa_session=")) return Result.success() // signed out
 
@@ -57,6 +58,22 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         }
         body.optString("cursor").takeIf { it.isNotBlank() }?.let { prefs.edit().putString(KEY_CURSOR, it).apply() }
         return Result.success()
+    }
+
+    /**
+     * About twice a day, even when the app isn't opened: if a newer version is
+     * out, says so once in a notification (tapping it opens the update prompt).
+     */
+    private suspend fun announceUpdate() {
+        val prefs = applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        val now = System.currentTimeMillis()
+        if (now - prefs.getLong(KEY_UPDATE_CHECK, 0) < UPDATE_CHECK_EVERY_MS) return
+        val release = withContext(Dispatchers.IO) { runCatching { AppUpdater.fetchLatestRelease() }.getOrNull() } ?: return
+        prefs.edit().putLong(KEY_UPDATE_CHECK, now).apply()
+        if (release.versionCode <= BuildConfig.VERSION_CODE) return
+        if (prefs.getInt(KEY_UPDATE_ANNOUNCED, 0) >= release.versionCode) return
+        prefs.edit().putInt(KEY_UPDATE_ANNOUNCED, release.versionCode).apply()
+        Notifications.showUpdate(applicationContext, release.versionName, release.notes)
     }
 
     private sealed interface Fetched {
@@ -91,6 +108,9 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
         private const val KEY_CURSOR = "cursor"
         private const val WORK_NAME = "proggaa-notifications"
         private const val MAX_SHOWN = 8
+        private const val KEY_UPDATE_CHECK = "updateCheck"
+        private const val KEY_UPDATE_ANNOUNCED = "updateAnnounced"
+        private const val UPDATE_CHECK_EVERY_MS = 12 * 60 * 60 * 1000L
 
         fun schedule(context: Context) {
             val request = PeriodicWorkRequestBuilder<NotificationWorker>(15, TimeUnit.MINUTES)
