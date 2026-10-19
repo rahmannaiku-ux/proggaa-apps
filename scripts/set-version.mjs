@@ -12,4 +12,6 @@ if (versionCode(next) <= versionCode(pkg.version)) {
 }
 pkg.version = next;
 writeFileSync(file, JSON.stringify(pkg, null, 2) + "\n");
-console.log(`Version set to ${next}. Now commit, then: git tag v${next} && git push && git push origin v${next}`);
+console.log(`Version set to ${next}. Now commit, then tag and push (see README: "Releasing an update"):
+  git tag -a v${next} -m "Proggaa ${next}" -m "<what's new>"
+  git push && git push origin v${next}`);
