@@ -47,6 +47,35 @@ class SiteTest {
     }
 
     @Test
+    fun pagesOpenInTheirTab() {
+        assertEquals(0, Site.tabFor("/dashboard"))
+        assertEquals(1, Site.tabFor("/my-courses"))
+        assertEquals(1, Site.tabFor("/missions/abc/operations/x"))
+        assertEquals(0, Site.tabFor("/missions"))
+        assertEquals(2, Site.tabFor("/results/123"))
+        assertEquals(3, Site.tabFor("/community/u/naimur"))
+        assertEquals(4, Site.tabFor("/community/messages/g/1"))
+        assertEquals(0, Site.tabFor("/notifications"))
+    }
+
+    @Test
+    fun tabBarHidesWhereItDoesNotBelong() {
+        assertTrue(Site.showsTabBar("/dashboard"))
+        assertTrue(Site.showsTabBar("/community"))
+        assertFalse(Site.showsTabBar("/login"))
+        assertFalse(Site.showsTabBar("/admin/apps"))
+        assertFalse(Site.showsTabBar("/mentor/dashboard"))
+        assertTrue(Site.showsTabBar("/mentorship")) // only whole path segments count
+    }
+
+    @Test
+    fun pathsOfAddresses() {
+        assertEquals("/community/u/x", Site.pathOf("https://prooggaa.com/community/u/x?y=1"))
+        assertEquals("/", Site.pathOf("https://prooggaa.com"))
+        assertNull(Site.pathOf(null))
+    }
+
+    @Test
     fun versionCodes() {
         assertEquals(10000, Site.versionCode("1.0.0"))
         assertEquals(10203, Site.versionCode("v1.2.3"))

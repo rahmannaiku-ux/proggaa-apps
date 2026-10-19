@@ -8,13 +8,11 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.Color
-import android.os.SystemClock
-import androidx.core.graphics.ColorUtils
-import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.SystemClock
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
@@ -39,35 +37,59 @@ import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
+import androidx.core.graphics.ColorUtils
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.core.view.isVisible
 import androidx.core.view.updatePadding
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import org.json.JSONObject
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * The whole app: prooggaa.com in a web view, with what a phone app needs on
- * top — picking files and videos to upload, downloads, full-screen video,
- * the back button, an offline screen, opening notifications, and updates.
- * The site gets no JavaScript bridge into the app.
+ * The app: prooggaa.com shown in native tabs. Each tab of the bottom bar
+ * (Home, Learn, Exams, Community, Chats) keeps its own page and history,
+ * like a real app, with unread badges. Around the pages: a splash screen,
+ * bars coloured like the page, file and video picking for uploads,
+ * downloads, full-screen video, the back button, an offline screen,
+ * opening notifications in the right tab, and updates. The site gets no
+ * JavaScript bridge into the app.
  */
 class MainActivity : ComponentActivity() {
 
     private lateinit var root: FrameLayout
-    private lateinit var webView: WebView
+    private lateinit var content: FrameLayout
+    private lateinit var tabBar: TabBar
     private lateinit var progress: ProgressBar
     private lateinit var offline: View
     private lateinit var updater: AppUpdater
+
+    /** One web view per tab, made the first time the tab is opened. */
+    private val tabs = arrayOfNulls<WebView>(Site.TABS.size)
+    private var current = 0
+    private var keyboardOpen = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private var mainFrameFailed = false
+    private var badgeJob: Job? = null
+    private var lastBadgeCheck = 0L
+
     /** The splash screen stays up until the first page has drawn (or a few seconds pass). */
     private var firstPageShown = false
     private val startedAt = SystemClock.uptimeMillis()
-    private val showProgress = Runnable { if (!firstPageShown || progress.progress < 100) progress.isVisible = true }
+    private val showProgress = Runnable { progress.isVisible = true }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
@@ -83,7 +105,6 @@ class MainActivity : ComponentActivity() {
 
     private val askNotifications = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
-    @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen().setKeepOnScreenCondition {
             !firstPageShown && SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS
@@ -91,14 +112,11 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         // Draw edge to edge and pad for the status bar, navigation bar and keyboard ourselves.
         WindowCompat.setDecorFitsSystemWindows(window, false)
-        WindowInsetsControllerCompat(window, window.decorView).apply {
-            // Dark icons on the site's cream background.
-            isAppearanceLightStatusBars = true
-            isAppearanceLightNavigationBars = true
-        }
+        setBarsColor(ContextCompat.getColor(this, R.color.proggaa_bg))
 
-        root = FrameLayout(this).apply { setBackgroundColor(ContextCompat.getColor(context, R.color.proggaa_bg)) }
-        webView = WebView(this).apply { setBackgroundColor(ContextCompat.getColor(context, R.color.proggaa_bg)) }
+        val background = ContextCompat.getColor(this, R.color.proggaa_bg)
+        root = FrameLayout(this).apply { setBackgroundColor(background) }
+        content = FrameLayout(this)
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
             isVisible = false
@@ -106,27 +124,38 @@ class MainActivity : ComponentActivity() {
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.TRANSPARENT)
         }
         offline = buildOfflineView()
+        tabBar = TabBar(this) { index, reselected -> onTabSelected(index, reselected) }.apply { isVisible = false }
 
-        root.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        root.addView(progress, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP))
-        root.addView(offline, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        content.addView(progress, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP))
+        content.addView(offline, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        val column = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            addView(content, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            addView(tabBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
+        }
+        root.addView(column, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         setContentView(root)
 
         ViewCompat.setOnApplyWindowInsetsListener(root) { view, insets ->
             val bars = insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
             val ime = insets.getInsets(WindowInsetsCompat.Type.ime())
+            // Like other apps, the tab bar steps aside while typing.
+            keyboardOpen = ime.bottom > bars.bottom
             view.updatePadding(left = bars.left, top = bars.top, right = bars.right, bottom = maxOf(bars.bottom, ime.bottom))
+            updateTabBarVisibility()
             WindowInsetsCompat.CONSUMED
         }
 
-        setUpWebView()
+        CookieManager.getInstance().setAcceptCookie(true)
         updater = AppUpdater(this)
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
+                val web = tabs[current]
                 when {
                     fullscreenView != null -> exitFullscreen()
-                    webView.canGoBack() && !offline.isVisible -> webView.goBack()
+                    web != null && web.canGoBack() && !offline.isVisible -> web.goBack()
+                    current != 0 && tabBar.isVisible -> showTab(0)
                     else -> {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
@@ -136,8 +165,18 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
-            webView.loadUrl(pageFromIntent(intent) ?: Site.START)
+        val restoredTab = savedInstanceState?.getInt(KEY_CURRENT, -1) ?: -1
+        if (restoredTab >= 0) {
+            for (i in tabs.indices) {
+                val state = savedInstanceState?.getBundle("$KEY_TAB$i") ?: continue
+                tabFor(i, initialUrl = null).restoreState(state)
+            }
+            showTab(restoredTab, animate = false)
+        } else {
+            val page = pageFromIntent(intent)
+            val start = page?.let { Site.tabFor(Site.pathOf(it) ?: "/") } ?: 0
+            tabFor(start, initialUrl = page ?: Site.START)
+            showTab(start, animate = false)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -148,16 +187,94 @@ class MainActivity : ComponentActivity() {
         updater.check(manual = false)
     }
 
-    @SuppressLint("SetJavaScriptEnabled")
-    private fun setUpWebView() {
-        CookieManager.getInstance().apply {
-            setAcceptCookie(true)
-            setAcceptThirdPartyCookies(webView, true) // YouTube lesson videos
+    // ---------------------------------------------------------------------
+    // Tabs
+    // ---------------------------------------------------------------------
+
+    private fun tabRoot(index: Int) = Site.BASE + Site.TABS[index].path
+
+    /** The web view of a tab, made (and pointed at `initialUrl` or the tab's first page) when first needed. */
+    private fun tabFor(index: Int, initialUrl: String? = tabRoot(index)): WebView {
+        tabs[index]?.let { return it }
+        val web = newWebView()
+        web.isVisible = false
+        content.addView(web, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        tabs[index] = web
+        initialUrl?.let { web.loadUrl(it) }
+        return web
+    }
+
+    private fun showTab(index: Int, animate: Boolean = true) {
+        val next = tabFor(index)
+        val previous = tabs[current]
+        current = index
+        tabBar.select(index)
+        if (previous !== next) {
+            if (animate) {
+                next.alpha = 0f
+                next.isVisible = true
+                next.animate().alpha(1f).setDuration(160).withEndAction { previous?.isVisible = false }.start()
+            } else {
+                next.isVisible = true
+                next.alpha = 1f
+                previous?.isVisible = false
+            }
+        } else {
+            next.isVisible = true
         }
+        next.requestFocus()
+        progress.isVisible = false
+        offline.isVisible = false
+        updateTabBarVisibility()
+        matchBarsToPage()
+    }
+
+    private fun onTabSelected(index: Int, reselected: Boolean) {
+        if (!reselected) {
+            showTab(index)
+            return
+        }
+        // Tapping the open tab again: back to its first page, or to the top of it.
+        val web = tabs[index] ?: return
+        if (Site.pathOf(web.url) == Site.TABS[index].path) {
+            web.evaluateJavascript("window.scrollTo({top:0,behavior:'smooth'})", null)
+        } else {
+            web.loadUrl(tabRoot(index))
+        }
+    }
+
+    private fun updateTabBarVisibility() {
+        if (!::tabBar.isInitialized) return
+        val path = Site.pathOf(tabs[current]?.url)
+        tabBar.isVisible = !keyboardOpen && path != null && Site.showsTabBar(path) && fullscreenView == null
+    }
+
+    /** Signed out: the other tabs show an old session's pages, so they start again after the next sign-in. */
+    private fun forgetOtherTabs() {
+        for (i in tabs.indices) {
+            if (i == current) continue
+            tabs[i]?.let {
+                content.removeView(it)
+                it.destroy()
+            }
+            tabs[i] = null
+        }
+        for (i in tabs.indices) tabBar.setBadge(i, 0)
+    }
+
+    // ---------------------------------------------------------------------
+    // Web views
+    // ---------------------------------------------------------------------
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun newWebView(): WebView {
+        val web = WebView(this)
+        web.setBackgroundColor(ContextCompat.getColor(this, R.color.proggaa_bg))
+        CookieManager.getInstance().setAcceptThirdPartyCookies(web, true) // YouTube lesson videos
         // The site scrolls itself; no Android glow at the edges of the page.
-        webView.overScrollMode = View.OVER_SCROLL_NEVER
-        webView.isVerticalScrollBarEnabled = false
-        webView.settings.apply {
+        web.overScrollMode = View.OVER_SCROLL_NEVER
+        web.isVerticalScrollBarEnabled = false
+        web.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
@@ -169,7 +286,7 @@ class MainActivity : ComponentActivity() {
             userAgentString = "$userAgentString ProggaaApp/Android/${BuildConfig.VERSION_NAME}"
         }
 
-        webView.webViewClient = object : WebViewClient() {
+        web.webViewClient = object : WebViewClient() {
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
                 val url = request.url.toString()
                 Site.browserTarget(url)?.let {
@@ -186,6 +303,7 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
+                if (view !== tabs[current]) return
                 mainFrameFailed = false
                 // Only slow loads show the bar: a quick page change should feel instant, like an app.
                 progress.removeCallbacks(showProgress)
@@ -193,21 +311,22 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                CookieManager.getInstance().flush()
+                if (view !== tabs[current]) return
                 progress.removeCallbacks(showProgress)
                 progress.isVisible = false
                 if (!mainFrameFailed) offline.isVisible = false
                 firstPageShown = true
-                matchBarsToPage()
-                CookieManager.getInstance().flush()
+                pageChanged(url)
             }
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
-                // The site changes pages without a full load; recolour the bars once it has drawn.
-                view.postDelayed({ matchBarsToPage() }, 350)
+                // The site changes pages without a full load.
+                if (view === tabs[current]) view.postDelayed({ pageChanged(view.url) }, 300)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame) {
+                if (request.isForMainFrame && view === tabs[current]) {
                     mainFrameFailed = true
                     firstPageShown = true
                     offline.isVisible = true
@@ -222,9 +341,9 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        webView.webChromeClient = object : WebChromeClient() {
+        web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                progress.progress = newProgress
+                if (view === tabs[current]) progress.progress = newProgress
             }
 
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
@@ -256,10 +375,63 @@ class MainActivity : ComponentActivity() {
             override fun onHideCustomView() = exitFullscreen()
         }
 
-        webView.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
+        web.setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
             download(url, userAgent, contentDisposition, mimeType)
         }
+        return web
     }
+
+    /** After every page change in the open tab: tab bar, bar colours, badges, and sign-out. */
+    private fun pageChanged(url: String?) {
+        val path = Site.pathOf(url)
+        if (path == "/login" || path == "/register") forgetOtherTabs()
+        updateTabBarVisibility()
+        matchBarsToPage()
+        if (tabBar.isVisible && SystemClock.uptimeMillis() - lastBadgeCheck > 20_000) refreshBadges()
+    }
+
+    // ---------------------------------------------------------------------
+    // Badges
+    // ---------------------------------------------------------------------
+
+    /** Reads the unread counts for the tab bar (signed in only). */
+    private fun refreshBadges() {
+        lastBadgeCheck = SystemClock.uptimeMillis()
+        lifecycleScope.launch {
+            val counts = withContext(Dispatchers.IO) {
+                val cookies = CookieManager.getInstance().getCookie(Site.BASE) ?: return@withContext null
+                if (!cookies.contains("proggaa_session=")) return@withContext null
+                runCatching {
+                    val conn = (URL(Site.BADGES_API).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 10_000
+                        readTimeout = 10_000
+                        setRequestProperty("Cookie", cookies)
+                        setRequestProperty("Accept", "application/json")
+                    }
+                    try {
+                        if (conn.responseCode != 200) null else JSONObject(conn.inputStream.bufferedReader().use { it.readText() })
+                    } finally {
+                        conn.disconnect()
+                    }
+                }.getOrNull()
+            } ?: return@launch
+            tabBar.setBadge(Site.TABS.indexOfFirst { it.label == "Chats" }, counts.optInt("chats"))
+        }
+    }
+
+    private fun startBadgeLoop() {
+        badgeJob?.cancel()
+        badgeJob = lifecycleScope.launch {
+            while (isActive) {
+                if (tabBar.isVisible) refreshBadges()
+                delay(BADGE_EVERY_MS)
+            }
+        }
+    }
+
+    // ---------------------------------------------------------------------
+    // Files, downloads, links, full screen
+    // ---------------------------------------------------------------------
 
     /** Opens the system file picker with the types the page asked for (e.g. images, or the reel video formats). */
     private fun fileChooserIntent(params: WebChromeClient.FileChooserParams): Intent {
@@ -343,26 +515,34 @@ class MainActivity : ComponentActivity() {
         WindowInsetsControllerCompat(window, window.decorView).show(WindowInsetsCompat.Type.systemBars())
         fullscreenCallback?.onCustomViewHidden()
         fullscreenCallback = null
+        updateTabBarVisibility()
     }
 
+    // ---------------------------------------------------------------------
+    // Colours
+    // ---------------------------------------------------------------------
+
     /**
-     * Colours the status and navigation bars like the page under them (cream,
-     * or dark when the site is in dark mode), so the app looks edge to edge.
+     * Colours the status bar, navigation bar and tab bar like the page (cream,
+     * or dark when the site is in dark mode), so the app looks all of a piece.
      */
     private fun matchBarsToPage() {
-        webView.evaluateJavascript(
+        val web = tabs[current] ?: return
+        web.evaluateJavascript(
             "(function(){var e=document.querySelector('header')||document.body;" +
                 "var c=getComputedStyle(e).backgroundColor;" +
                 "if(!c||c==='rgba(0, 0, 0, 0)'||c==='transparent')c=getComputedStyle(document.body).backgroundColor;return c})()"
         ) { raw ->
             val match = Regex("""rgba?\((\d+),\s*(\d+),\s*(\d+)""").find(raw ?: return@evaluateJavascript) ?: return@evaluateJavascript
             val (r, g, b) = match.destructured
-            setBarsColor(Color.rgb(r.toInt(), g.toInt(), b.toInt()))
+            val color = Color.rgb(r.toInt(), g.toInt(), b.toInt())
+            setBarsColor(color)
+            tabBar.setPageColor(color)
         }
     }
 
     private fun setBarsColor(color: Int) {
-        root.setBackgroundColor(color)
+        if (::root.isInitialized) root.setBackgroundColor(color)
         val light = ColorUtils.calculateLuminance(color) > 0.5
         WindowInsetsControllerCompat(window, window.decorView).apply {
             isAppearanceLightStatusBars = light
@@ -381,6 +561,7 @@ class MainActivity : ComponentActivity() {
         addView(TextView(context).apply {
             text = "You're offline"
             textSize = 20f
+            typeface = android.graphics.Typeface.DEFAULT_BOLD
             setTextColor(ContextCompat.getColor(context, R.color.proggaa_ink))
             gravity = Gravity.CENTER
             setPadding(0, dp(16), 0, dp(4))
@@ -393,11 +574,18 @@ class MainActivity : ComponentActivity() {
         addView(Button(context).apply {
             text = "Try again"
             isAllCaps = false
-            setTextColor(android.graphics.Color.WHITE)
+            setTextColor(Color.WHITE)
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.proggaa_primary)
-            setOnClickListener { webView.url?.let { webView.reload() } ?: webView.loadUrl(Site.START) }
+            setOnClickListener {
+                val web = tabs[current] ?: return@setOnClickListener
+                if (web.url != null) web.reload() else web.loadUrl(tabRoot(current))
+            }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20) })
     }
+
+    // ---------------------------------------------------------------------
+    // Lifecycle
+    // ---------------------------------------------------------------------
 
     /** The page an intent asks for: a notification's link, or a prooggaa.com link opened with the app. */
     private fun pageFromIntent(intent: Intent?): String? {
@@ -409,33 +597,44 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        pageFromIntent(intent)?.let { webView.loadUrl(it) }
+        val page = pageFromIntent(intent) ?: return
+        val index = Site.tabFor(Site.pathOf(page) ?: "/")
+        val web = tabFor(index, initialUrl = null)
+        web.loadUrl(page)
+        showTab(index)
     }
 
     override fun onResume() {
         super.onResume()
         inForeground = true
-        webView.onResume()
+        tabs.forEach { it?.onResume() }
         updater.onResume()
+        startBadgeLoop()
     }
 
     override fun onPause() {
         inForeground = false
-        webView.onPause()
+        badgeJob?.cancel()
+        tabs.forEach { it?.onPause() }
         CookieManager.getInstance().flush()
         super.onPause()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        webView.saveState(outState)
+        outState.putInt(KEY_CURRENT, current)
+        tabs.forEachIndexed { i, web -> web?.let { outState.putBundle("$KEY_TAB$i", Bundle().also { b -> it.saveState(b) }) } }
     }
 
     override fun onDestroy() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
-        root.removeView(webView)
-        webView.destroy()
+        tabs.forEach {
+            it?.let { web ->
+                content.removeView(web)
+                web.destroy()
+            }
+        }
         super.onDestroy()
     }
 
@@ -443,8 +642,11 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        private const val KEY_CURRENT = "tab"
+        private const val KEY_TAB = "tab-state-"
         private const val SPLASH_MAX_MS = 4000L
         private const val PROGRESS_DELAY_MS = 350L
+        private const val BADGE_EVERY_MS = 60_000L
 
         /** Read by NotificationWorker: while the app is open the site shows notifications itself. */
         @Volatile

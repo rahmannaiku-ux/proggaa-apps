@@ -28,6 +28,9 @@ object Site {
         return if (runCatching { URI(target).scheme }.getOrNull() == "https") target else null
     }
 
+    /** Counts for the tab bar badges (see the website's /api/app/badges). */
+    const val BADGES_API = "$BASE/api/app/badges"
+
     /** New, unread notifications for the signed-in person (see the website's /api/app/notifications). */
     const val NOTIFICATIONS_API = "$BASE/api/app/notifications"
 
@@ -50,6 +53,39 @@ object Site {
         if (link.isNullOrBlank()) return START
         if (link.startsWith("/") && !link.startsWith("//")) return BASE + link
         return if (opensInApp(link) && !link.contains("accounts.google.com")) link else START
+    }
+
+    /** The app's tab bar: each tab is its own page stack, like a native app. */
+    data class Tab(val label: String, val path: String)
+
+    val TABS = listOf(
+        Tab("Home", "/dashboard"),
+        Tab("Learn", "/my-courses"),
+        Tab("Exams", "/exams"),
+        Tab("Community", "/community"),
+        Tab("Chats", "/community/messages"),
+    )
+
+    private fun under(path: String, base: String) = path == base || path.startsWith("$base/")
+
+    /** Which tab a page belongs to (a notification or link opens there). */
+    fun tabFor(path: String): Int = when {
+        under(path, "/community/messages") -> 4
+        under(path, "/community") -> 3
+        under(path, "/exams") || under(path, "/results") -> 2
+        under(path, "/my-courses") || (under(path, "/missions") && path != "/missions") || under(path, "/challenges") -> 1
+        else -> 0
+    }
+
+    /** Signing in, and the mentor and admin consoles (they have their own navigation), show no tab bar. */
+    fun showsTabBar(path: String): Boolean =
+        listOf("/login", "/register", "/forgot-password", "/complete-profile", "/sign-in", "/sign-up", "/admin", "/mentor", "/live/manage", "/security")
+            .none { under(path, it) }
+
+    /** The path of a site address ("/community/u/x" for https://prooggaa.com/community/u/x?y=1), or null. */
+    fun pathOf(url: String?): String? {
+        val uri = runCatching { URI(url ?: return null) }.getOrNull() ?: return null
+        return uri.path?.ifEmpty { "/" }
     }
 
     /** 1.2.3 -> 10203: the same rule as versionCode in app/build.gradle.kts. */
