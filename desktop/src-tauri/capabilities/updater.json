@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "updater",
+  "description": "The update window (dist/update.html) only: read the waiting update, start it or close the window, hear its progress and be dragged. The main window shows the website and gets nothing.",
+  "windows": ["updater"],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:window:allow-start-dragging",
+    "allow-update-info",
+    "allow-start-update",
+    "allow-dismiss-update"
+  ]
+}

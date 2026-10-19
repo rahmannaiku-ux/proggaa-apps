@@ -1,6 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- The site's dark background, so there is no white flash before it loads. -->
-    <color name="proggaa_bg">#FF110C1D</color>
-    <color name="proggaa_primary">#FF8B5CF6</color>
+    <!-- The website's colours (src/app/globals.css on prooggaa.com). -->
+    <color name="proggaa_bg">#FFFCF9F3</color>        <!-- warm cream -->
+    <color name="proggaa_surface">#FFFFFFFF</color>
+    <color name="proggaa_ink">#FF1F1433</color>       <!-- outlines and text -->
+    <color name="proggaa_muted_ink">#FF5B5170</color>
+    <color name="proggaa_muted">#FFF3EFE6</color>
+    <color name="proggaa_primary">#FF53328B</color>   <!-- deep purple -->
+    <color name="proggaa_accent">#FF6B1FC1</color>    <!-- electric violet -->
+    <color name="proggaa_xp">#FFFAB719</color>        <!-- golden yellow -->
+    <color name="proggaa_danger">#FFBC2F1A</color>
 </resources>

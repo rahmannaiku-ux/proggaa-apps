@@ -81,8 +81,9 @@ class MainActivity : ComponentActivity() {
         // Draw edge to edge and pad for the status bar, navigation bar and keyboard ourselves.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         WindowInsetsControllerCompat(window, window.decorView).apply {
-            isAppearanceLightStatusBars = false
-            isAppearanceLightNavigationBars = false
+            // Dark icons on the site's cream background.
+            isAppearanceLightStatusBars = true
+            isAppearanceLightNavigationBars = true
         }
 
         root = FrameLayout(this).apply { setBackgroundColor(ContextCompat.getColor(context, R.color.proggaa_bg)) }
@@ -323,21 +324,24 @@ class MainActivity : ComponentActivity() {
         isClickable = true // nothing behind it can be tapped
         setBackgroundColor(ContextCompat.getColor(context, R.color.proggaa_bg))
         setPadding(dp(32), dp(32), dp(32), dp(32))
-        addView(ImageView(context).apply { setImageResource(R.mipmap.ic_launcher) }, LinearLayout.LayoutParams(dp(96), dp(96)))
+        addView(ImageView(context).apply { setImageResource(R.drawable.proggaa_logo) }, LinearLayout.LayoutParams(dp(112), dp(112)))
         addView(TextView(context).apply {
             text = "You're offline"
             textSize = 20f
-            setTextColor(0xFFF5F0FF.toInt())
+            setTextColor(ContextCompat.getColor(context, R.color.proggaa_ink))
             gravity = Gravity.CENTER
             setPadding(0, dp(16), 0, dp(4))
         })
         addView(TextView(context).apply {
             text = "Proggaa needs the internet. Check your connection and try again."
-            setTextColor(0xFFB9AED6.toInt())
+            setTextColor(ContextCompat.getColor(context, R.color.proggaa_muted_ink))
             gravity = Gravity.CENTER
         })
         addView(Button(context).apply {
             text = "Try again"
+            isAllCaps = false
+            setTextColor(android.graphics.Color.WHITE)
+            backgroundTintList = ContextCompat.getColorStateList(context, R.color.proggaa_primary)
             setOnClickListener { webView.url?.let { webView.reload() } ?: webView.loadUrl(Site.START) }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20) })
     }

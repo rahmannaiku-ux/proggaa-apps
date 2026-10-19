@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Update Proggaa</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Baloo+2:wght@600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
+  <style>
+    /* The website's colours (src/app/globals.css on prooggaa.com): warm cream,
+       ink outlines with a hard offset shadow, deep purple, golden XP yellow. */
+    :root {
+      --background: #fcf9f3;
+      --surface: #ffffff;
+      --ink: #1f1433;
+      --muted: #f3efe6;
+      --muted-ink: #5b5170;
+      --primary: #53328b;
+      --accent: #6b1fc1;
+      --xp: #fab719;
+      --xp-ink: #855007;
+      --danger: #bc2f1a;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font: 14px/1.5 Inter, "Segoe UI", system-ui, sans-serif;
+      color: var(--ink);
+      background-color: var(--background);
+      /* the site's halftone dots */
+      background-image: radial-gradient(rgba(31, 20, 51, 0.07) 1px, transparent 1.2px);
+      background-size: 14px 14px;
+      display: flex; flex-direction: column; overflow: hidden; user-select: none;
+      border: 2px solid var(--ink);
+    }
+    .display { font-family: "Baloo 2", "Segoe UI", sans-serif; }
+    .bar { height: 34px; display: flex; align-items: center; justify-content: flex-end; padding: 4px 6px 0; }
+    .x {
+      width: 30px; height: 30px; border: 2px solid transparent; border-radius: 10px; background: transparent;
+      color: var(--muted-ink); font-size: 18px; line-height: 1; cursor: pointer;
+    }
+    .x:hover { border-color: var(--ink); background: var(--surface); color: var(--ink); }
+    main { flex: 1; display: flex; flex-direction: column; align-items: center; padding: 0 24px 22px; text-align: center; }
+    .logo { width: 104px; height: 104px; animation: bob 3s ease-in-out infinite; filter: drop-shadow(3px 4px 0 rgba(31, 20, 51, 0.15)); }
+    @keyframes bob { 50% { transform: translateY(-5px) rotate(-2deg); } }
+    .sticker {
+      margin-top: 4px; display: inline-flex; align-items: center; gap: 6px; padding: 2px 12px; border-radius: 999px;
+      background: var(--xp); color: var(--ink); border: 2px solid var(--ink); box-shadow: 2px 2px 0 var(--ink);
+      font-size: 12px; font-weight: 800; letter-spacing: 0.04em; transform: rotate(-2deg);
+    }
+    h1 { margin: 10px 0 0; font-size: 26px; font-weight: 800; line-height: 1.1; color: var(--ink); }
+    .versions { display: flex; align-items: center; gap: 10px; margin-top: 10px; font-weight: 700; }
+    .v {
+      padding: 2px 12px; border-radius: 10px; border: 2px solid var(--ink); background: var(--surface);
+      font-size: 14px; color: var(--muted-ink);
+    }
+    .v.new { background: var(--primary); color: #fff; box-shadow: 3px 3px 0 var(--ink); }
+    .arrow { color: var(--accent); font-weight: 800; font-size: 18px; }
+    .panel {
+      width: 100%; margin-top: 16px; padding: 12px 14px; border-radius: 16px; text-align: left;
+      background: var(--surface); border: 2px solid var(--ink); box-shadow: 4px 4px 0 var(--ink);
+    }
+    .panel b { display: block; margin-bottom: 2px; font-family: "Baloo 2", sans-serif; font-size: 15px; color: var(--accent); }
+    #notes { max-height: 86px; overflow: auto; white-space: pre-wrap; color: var(--muted-ink); font-size: 13px; }
+    .progress { display: none; }
+    .track { height: 14px; border-radius: 999px; border: 2px solid var(--ink); background: var(--muted); overflow: hidden; }
+    .fill {
+      height: 100%; width: 0%; border-radius: 999px; transition: width 0.25s ease;
+      background: repeating-linear-gradient(-45deg, var(--accent) 0 10px, var(--primary) 10px 20px);
+      background-size: 28px 28px; animation: stripes 0.8s linear infinite;
+    }
+    .fill.unknown { width: 40% !important; animation: stripes 0.8s linear infinite, slide 1.3s ease-in-out infinite; }
+    @keyframes stripes { to { background-position: 28px 0; } }
+    @keyframes slide { 0% { transform: translateX(-110%); } 100% { transform: translateX(260%); } }
+    .status { margin-top: 6px; font-size: 12px; color: var(--muted-ink); display: flex; justify-content: space-between; gap: 8px; }
+    .status strong { color: var(--ink); }
+    .actions { width: 100%; margin-top: auto; padding-top: 16px; display: flex; gap: 10px; }
+    button.btn {
+      flex: 1; height: 46px; border-radius: 14px; border: 2px solid var(--ink); font: 700 15px "Baloo 2", "Segoe UI", sans-serif;
+      cursor: pointer; box-shadow: 3px 3px 0 var(--ink); transition: transform 0.08s ease, box-shadow 0.08s ease;
+    }
+    button.btn:hover { transform: translate(-1px, -1px); box-shadow: 4px 4px 0 var(--ink); }
+    button.btn:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 var(--ink); }
+    button.primary { flex: 1.6; background: var(--primary); color: #fff; }
+    button.ghost { background: var(--surface); color: var(--ink); }
+    button.btn:disabled { opacity: 0.6; cursor: default; transform: none; box-shadow: 3px 3px 0 var(--ink); }
+    .error { color: var(--danger); font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="bar" data-tauri-drag-region>
+    <button class="x" id="close" type="button" aria-label="Close">×</button>
+  </div>
+  <main data-tauri-drag-region>
+    <img class="logo" src="logo.png" alt="" />
+    <span class="sticker display">⚡ NEW VERSION</span>
+    <h1 class="display">A fresh Proggaa is here!</h1>
+    <div class="versions">
+      <span class="v" id="current">…</span>
+      <span class="arrow">→</span>
+      <span class="v new" id="next">…</span>
+    </div>
+    <div class="panel" id="notes-box"><b>What's new</b><div id="notes"></div></div>
+    <div class="panel progress" id="progress">
+      <div class="track"><div class="fill" id="fill"></div></div>
+      <div class="status"><span id="status-text">Downloading…</span><strong id="percent"></strong></div>
+    </div>
+    <div class="actions">
+      <button class="btn ghost" id="later" type="button">Later</button>
+      <button class="btn primary" id="go" type="button">Update now</button>
+    </div>
+  </main>
+  <script>
+    // The update window: shows what's new and runs the update through the app
+    // (update_info / start_update / dismiss_update in src-tauri/src/lib.rs).
+    const { invoke } = window.__TAURI__.core;
+    const { listen } = window.__TAURI__.event;
+    const $ = (id) => document.getElementById(id);
+    const mb = (n) => (n / 1048576).toFixed(1) + " MB";
+
+    invoke("update_info").then((info) => {
+      $("current").textContent = info.current;
+      $("next").textContent = info.version;
+      $("notes").textContent = info.notes || "Improvements and fixes.";
+    }).catch(() => invoke("dismiss_update"));
+
+    listen("update-progress", ({ payload }) => {
+      const { downloaded, total } = payload;
+      const fill = $("fill");
+      if (total) {
+        const pct = Math.min(100, Math.round((downloaded / total) * 100));
+        fill.classList.remove("unknown");
+        fill.style.width = pct + "%";
+        $("percent").textContent = pct + "%";
+        $("status-text").textContent = `Downloading… ${mb(downloaded)} of ${mb(total)}`;
+      } else {
+        fill.classList.add("unknown");
+        $("status-text").textContent = `Downloading… ${mb(downloaded)}`;
+      }
+    });
+    listen("update-installing", () => {
+      $("fill").classList.remove("unknown");
+      $("fill").style.width = "100%";
+      $("percent").textContent = "100%";
+      $("status-text").textContent = "Installing… Proggaa opens again by itself";
+    });
+    listen("update-error", ({ payload }) => {
+      $("status-text").textContent = "";
+      const s = document.createElement("span");
+      s.className = "error";
+      s.textContent = "The update didn't finish. " + payload;
+      $("status-text").appendChild(s);
+      $("percent").textContent = "";
+      $("go").disabled = false;
+      $("go").textContent = "Try again";
+      $("later").disabled = false;
+    });
+
+    $("go").addEventListener("click", () => {
+      $("go").disabled = true;
+      $("later").disabled = true;
+      $("go").textContent = "Updating…";
+      $("notes-box").style.display = "none";
+      $("progress").style.display = "block";
+      $("fill").classList.add("unknown");
+      invoke("start_update");
+    });
+    $("later").addEventListener("click", () => invoke("dismiss_update"));
+    $("close").addEventListener("click", () => invoke("dismiss_update"));
+    document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !$("later").disabled) invoke("dismiss_update"); });
+  </script>
+</body>
+</html>

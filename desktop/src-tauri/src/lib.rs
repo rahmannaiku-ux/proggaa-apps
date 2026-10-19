@@ -5,14 +5,23 @@
 //! The site gets no access to Tauri's API (there is no capability for remote
 //! pages): everything the app does natively happens here in Rust.
 
+use std::sync::Mutex;
 use std::time::Duration;
 
+use serde::Serialize;
 use tauri::webview::NewWindowResponse;
-use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
-use tauri_plugin_updater::UpdaterExt;
+use tauri_plugin_updater::{Update, UpdaterExt};
 use url::Url;
+
+/// The update found by the last check, waiting for the person to choose in the update window.
+#[derive(Default)]
+struct PendingUpdate(Mutex<Option<Update>>);
+
+/// The label of the update window (`dist/update.html`); the only window allowed to call the update commands.
+const UPDATE_WINDOW: &str = "updater";
 
 /// The site the app shows.
 pub const SITE: &str = "https://prooggaa.com";
@@ -78,6 +87,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(PendingUpdate::default())
+        .invoke_handler(tauri::generate_handler![update_info, start_update, dismiss_update])
         .setup(|app| {
             let handle = app.handle().clone();
             let version = app.package_info().version.to_string();
@@ -184,59 +195,106 @@ async fn check_for_update(app: &AppHandle, manual: bool) {
         }
     };
 
-    let notes = update.body.clone().unwrap_or_default();
-    let message = format!(
-        "Proggaa {} is ready (you have {}).\n\n{}{}The app will close, update and open again by itself.",
-        update.version,
-        update.current_version,
-        notes.trim(),
-        if notes.trim().is_empty() { "" } else { "\n\n" },
-    );
-    let yes = ask(
-        app,
-        "Update available",
-        message,
-        MessageDialogButtons::OkCancelCustom("Update now".into(), "Later".into()),
-        MessageDialogKind::Info,
-    )
-    .await;
-    if !yes {
+    if let Some(state) = app.try_state::<PendingUpdate>() {
+        *state.0.lock().unwrap() = Some(update);
+    }
+    show_update_window(app);
+}
+
+/// Opens the update window (or brings it to the front if it is already open).
+fn show_update_window(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(UPDATE_WINDOW) {
+        let _ = window.unminimize();
+        let _ = window.set_focus();
         return;
     }
+    let built = WebviewWindowBuilder::new(app, UPDATE_WINDOW, WebviewUrl::App("update.html".into()))
+        .title("Update Proggaa")
+        .inner_size(400.0, 500.0)
+        .resizable(false)
+        .maximizable(false)
+        .minimizable(false)
+        .decorations(false)
+        .always_on_top(true)
+        .center()
+        .focused(true)
+        .build();
+    if let Err(err) = built {
+        eprintln!("could not open the update window: {err}");
+    }
+}
 
-    let window = app.get_webview_window("main");
-    let mut downloaded: u64 = 0;
-    let result = update
-        .download_and_install(
-            |chunk, total| {
-                downloaded += chunk as u64;
-                if let (Some(window), Some(total)) = (&window, total) {
-                    if total > 0 {
-                        let _ = window.set_title(&format!("Proggaa — downloading update {}%", downloaded * 100 / total));
+#[derive(Serialize)]
+struct UpdateInfo {
+    current: String,
+    version: String,
+    notes: String,
+}
+
+/// What the update window shows: the installed version, the new one and what's new.
+#[tauri::command]
+fn update_info(state: State<'_, PendingUpdate>) -> Result<UpdateInfo, String> {
+    let guard = state.0.lock().unwrap();
+    let update = guard.as_ref().ok_or("No update is waiting.")?;
+    Ok(UpdateInfo {
+        current: update.current_version.clone(),
+        version: update.version.clone(),
+        notes: update.body.clone().unwrap_or_default().trim().to_string(),
+    })
+}
+
+#[derive(Clone, Serialize)]
+struct Progress {
+    downloaded: u64,
+    total: Option<u64>,
+}
+
+/// Downloads the waiting update (checked against the updater key) while the
+/// window shows progress, then installs it; the installer reopens the app.
+#[tauri::command]
+fn start_update(app: AppHandle, state: State<'_, PendingUpdate>) -> Result<(), String> {
+    let update = state.0.lock().unwrap().clone().ok_or("No update is waiting.")?;
+    tauri::async_runtime::spawn(async move {
+        let mut downloaded: u64 = 0;
+        let mut last_percent: Option<u64> = None;
+        let progress_app = app.clone();
+        let done_app = app.clone();
+        let result = update
+            .download_and_install(
+                move |chunk, total| {
+                    downloaded += chunk as u64;
+                    // At most one message per whole percent (or per ~256 KB when the size is unknown).
+                    let step = match total {
+                        Some(t) if t > 0 => downloaded * 100 / t,
+                        _ => downloaded / (256 * 1024),
+                    };
+                    if last_percent != Some(step) {
+                        last_percent = Some(step);
+                        let _ = progress_app.emit_to(UPDATE_WINDOW, "update-progress", Progress { downloaded, total });
                     }
-                }
-            },
-            || {},
-        )
-        .await;
-
-    match result {
-        // On Windows the installer takes over from here and reopens the app;
-        // restarting covers the case where it hands back control instead.
-        Ok(()) => app.restart(),
-        Err(err) => {
-            if let Some(window) = &window {
-                let _ = window.set_title("Proggaa");
-            }
-            ask(
-                app,
-                "Update failed",
-                format!("The update couldn't be installed. Proggaa will try again later.\n\n({err})"),
-                MessageDialogButtons::Ok,
-                MessageDialogKind::Error,
+                },
+                move || {
+                    let _ = done_app.emit_to(UPDATE_WINDOW, "update-installing", ());
+                },
             )
             .await;
+        match result {
+            // On Windows the installer takes over from here and reopens the app;
+            // restarting covers the case where it hands back control instead.
+            Ok(()) => app.restart(),
+            Err(err) => {
+                let _ = app.emit_to(UPDATE_WINDOW, "update-error", err.to_string());
+            }
         }
+    });
+    Ok(())
+}
+
+/// "Later": closes the update window. The app asks again at the next check.
+#[tauri::command]
+fn dismiss_update(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(UPDATE_WINDOW) {
+        let _ = window.close();
     }
 }
 

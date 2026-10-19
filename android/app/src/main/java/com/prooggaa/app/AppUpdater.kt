@@ -6,10 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
-import android.view.Gravity
-import android.widget.LinearLayout
-import android.widget.ProgressBar
-import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.core.content.FileProvider
@@ -98,64 +94,44 @@ class AppUpdater(private val activity: ComponentActivity) {
 
     private fun offer(release: Release) {
         if (activity.isFinishing) return
-        val notes = release.notes.trim()
-        AlertDialog.Builder(activity)
-            .setTitle("Update available")
-            .setMessage(
-                "Proggaa ${release.versionName} is ready (you have ${BuildConfig.VERSION_NAME})." +
-                    (if (notes.isNotEmpty()) "\n\n$notes" else "")
-            )
-            .setPositiveButton("Update now") { _, _ -> download(release) }
-            .setNegativeButton("Later") { _, _ ->
+        var job: Job? = null
+        lateinit var dialog: UpdateDialog
+        dialog = UpdateDialog(
+            activity,
+            currentVersion = BuildConfig.VERSION_NAME,
+            newVersion = release.versionName,
+            notes = release.notes.trim(),
+            onUpdate = { job = download(release, dialog) },
+            onLater = {
                 prefs.edit().putLong(KEY_SNOOZE_PREFIX + release.versionCode, System.currentTimeMillis() + SNOOZE_MS).apply()
-            }
-            .show()
+            },
+            onCancelDownload = { job?.cancel() },
+        )
+        dialog.show()
     }
 
-    private fun download(release: Release) {
-        val bar = ProgressBar(activity, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100; isIndeterminate = true }
-        val label = TextView(activity).apply { text = "Downloading..."; gravity = Gravity.CENTER }
-        val box = LinearLayout(activity).apply {
-            orientation = LinearLayout.VERTICAL
-            val pad = (20 * resources.displayMetrics.density).toInt()
-            setPadding(pad, pad, pad, pad / 2)
-            addView(bar)
-            addView(label)
-        }
-        var job: Job? = null
-        val dialog = AlertDialog.Builder(activity)
-            .setTitle("Updating Proggaa")
-            .setView(box)
-            .setCancelable(false)
-            .setNegativeButton("Cancel") { _, _ -> job?.cancel() }
-            .create()
-
-        job = activity.lifecycleScope.launch {
+    private fun download(release: Release, dialog: UpdateDialog): Job {
+        dialog.showDownloading()
+        return activity.lifecycleScope.launch {
             val dir = File(activity.cacheDir, "updates").apply { mkdirs() }
             dir.listFiles()?.forEach { it.delete() } // an older, half-finished or installed download
             val file = File(dir, "proggaa-${release.versionName}.apk")
             val ok = withContext(Dispatchers.IO) {
                 runCatching {
                     downloadTo(release, file, cancelled = { !isActive }) { percent ->
-                        activity.runOnUiThread {
-                            bar.isIndeterminate = percent < 0
-                            if (percent >= 0) {
-                                bar.progress = percent
-                                label.text = "$percent%"
-                            }
-                        }
+                        activity.runOnUiThread { dialog.setProgress(percent) }
                     }
                 }
             }
-            if (dialog.isShowing) dialog.dismiss()
             if (!isActive) return@launch
-            ok.onSuccess { install(file) }
-                .onFailure {
-                    file.delete()
-                    toast("The update didn't download completely. Please try again.")
-                }
+            ok.onSuccess {
+                dialog.dismiss()
+                install(file)
+            }.onFailure {
+                file.delete()
+                dialog.showError("The update didn't download completely. Check your connection and try again.")
+            }
         }
-        dialog.show()
     }
 
     /** Streams the APK to `file`, reporting percent (or -1 when the size is unknown), and verifies its SHA-256. */
