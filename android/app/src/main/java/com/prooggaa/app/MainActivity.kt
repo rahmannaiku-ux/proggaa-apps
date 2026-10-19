@@ -198,7 +198,9 @@ class MainActivity : ComponentActivity() {
     private fun tabFor(index: Int, initialUrl: String? = tabRoot(index)): WebView {
         tabs[index]?.let { return it }
         val web = newWebView()
-        web.isVisible = false
+        // INVISIBLE, not GONE: a hidden tab keeps the full screen size while its page loads,
+        // so the page is laid out for the phone's width instead of shrunk to a desktop width.
+        web.visibility = View.INVISIBLE
         content.addView(web, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         tabs[index] = web
         initialUrl?.let { web.loadUrl(it) }
@@ -210,18 +212,16 @@ class MainActivity : ComponentActivity() {
         val previous = tabs[current]
         current = index
         tabBar.select(index)
-        if (previous !== next) {
-            if (animate) {
-                next.alpha = 0f
-                next.isVisible = true
-                next.animate().alpha(1f).setDuration(160).withEndAction { previous?.isVisible = false }.start()
-            } else {
-                next.isVisible = true
-                next.alpha = 1f
-                previous?.isVisible = false
-            }
+        previous?.animate()?.cancel()
+        next.animate().cancel()
+        next.visibility = View.VISIBLE
+        if (previous !== next) previous?.visibility = View.INVISIBLE
+        if (animate && previous !== next) {
+            // A quick fade-in, like switching tabs in a native app.
+            next.alpha = 0.35f
+            next.animate().alpha(1f).setDuration(140).start()
         } else {
-            next.isVisible = true
+            next.alpha = 1f
         }
         next.requestFocus()
         progress.isVisible = false
@@ -276,6 +276,14 @@ class MainActivity : ComponentActivity() {
         web.overScrollMode = View.OVER_SCROLL_NEVER
         web.isVerticalScrollBarEnabled = false
         web.settings.apply {
+            // Lay pages out for the phone like a mobile browser does, never zoomed out,
+            // and keep the app's text size steady whatever the phone's font setting.
+            useWideViewPort = true
+            loadWithOverviewMode = false
+            textZoom = 100
+            setSupportZoom(false)
+            builtInZoomControls = false
+            displayZoomControls = false
             javaScriptEnabled = true
             domStorageEnabled = true
             databaseEnabled = true
