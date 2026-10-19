@@ -49,6 +49,20 @@ installer closes, updates and reopens the app. That window is the only one allow
 
 ### Android (`android/`)
 
+It is built to feel like a native app rather than a website in a frame:
+
+- **Native tab bar** (`TabBar.kt`): Home, Learn, Exams, Community and Chats, drawn natively in the site's style. Each
+  tab is its own web view with its own history, so switching tabs keeps your place, like a real app. Tapping the
+  open tab goes back to its first page (or scrolls to the top). Chats shows an unread badge (from the site's
+  `/api/app/badges`). The bar hides while typing and on the login, mentor and admin screens. From version 1.0.4 the
+  site hides its own bottom bar inside the app (`app-mode.tsx` adds `proggaa-app-tabs`).
+- **Splash screen** (Android 12+ style, also on older phones): the logo on the site's deep purple, kept until the first
+  page has drawn, so the app never flashes a blank page.
+- **Icon**: an adaptive icon with the logo inside Android's safe zone on a purple gradient, so launchers don't crop it.
+- **Bars that match the page**: the status bar, navigation bar and tab bar take the page's colour (light or dark mode).
+- **Quieter loading**: no progress bar for quick page changes, no scroll bars or edge glow, no tap flashes or text
+  selection on buttons (the site adds these touches when it sees the app).
+
 - `MainActivity.kt`: the web view, file and video picking for uploads (reels, photos, assignments), downloads through
   Android's download manager (with the session cookie), full-screen video, the back button, the offline screen, edge-to-edge
   layout that keeps clear of the keyboard, and opening the page a notification points to.
