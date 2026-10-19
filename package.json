@@ -1,0 +1,12 @@
+{
+  "name": "proggaa-apps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Proggaa for Windows and Android. This version number is the single source for both apps (see scripts/set-version.mjs).",
+  "scripts": {
+    "desktop:dev": "npm --prefix desktop run tauri dev",
+    "desktop:build": "npm --prefix desktop run tauri build",
+    "version:set": "node scripts/set-version.mjs",
+    "test": "node --test scripts/manifests.test.mjs"
+  }
+}

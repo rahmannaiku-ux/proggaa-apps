@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Proggaa</title>
+  <style>
+    :root { color-scheme: dark; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      display: flex; align-items: center; justify-content: center;
+      background: #110c1d; color: #f5f0ff;
+      font: 15px/1.5 "Segoe UI", system-ui, sans-serif; text-align: center;
+    }
+    img { width: 132px; height: 132px; }
+    p { margin: 8px 0 0; color: #b9aed6; }
+    #offline { display: none; }
+    button {
+      margin-top: 18px; padding: 10px 22px; border: 0; border-radius: 999px;
+      background: #8b5cf6; color: #fff; font: inherit; font-weight: 700; cursor: pointer;
+    }
+    .dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
+    @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
+  </style>
+</head>
+<body>
+  <main>
+    <img src="logo.png" alt="Proggaa" />
+    <div id="connecting"><p class="dots">Opening Proggaa</p></div>
+    <div id="offline">
+      <p><strong style="color:#f5f0ff">You're offline</strong></p>
+      <p>Proggaa needs the internet. It will open as soon as you're connected.</p>
+      <button type="button" id="retry">Try again</button>
+    </div>
+  </main>
+  <script>
+    // The app's start page: checks the site can be reached, then opens it.
+    // Without a connection it waits here instead of showing a browser error.
+    const SITE = "https://prooggaa.com";
+    const START = SITE + "/dashboard";
+    let timer = null;
+
+    function show(id) {
+      document.getElementById("connecting").style.display = id === "connecting" ? "block" : "none";
+      document.getElementById("offline").style.display = id === "offline" ? "block" : "none";
+    }
+
+    async function reachable() {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), 8000);
+      try {
+        // An opaque (no-cors) answer is enough: it means the site responded.
+        await fetch(SITE + "/api/health", { mode: "no-cors", cache: "no-store", signal: ctrl.signal });
+        return true;
+      } catch {
+        return false;
+      } finally {
+        clearTimeout(t);
+      }
+    }
+
+    async function open() {
+      clearTimeout(timer);
+      show("connecting");
+      if (await reachable()) {
+        location.replace(START);
+      } else {
+        show("offline");
+        timer = setTimeout(open, 5000);
+      }
+    }
+
+    document.getElementById("retry").addEventListener("click", open);
+    window.addEventListener("online", open);
+    open();
+  </script>
+</body>
+</html>

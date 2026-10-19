@@ -1,0 +1,18 @@
+node_modules/
+desktop/src-tauri/target/
+desktop/src-tauri/gen/
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+*.iml
+release-assets/
+# Signing keys never live in this repo (see README: "Keys").
+*.p12
+*.jks
+*.keystore
+*.key
+*.password
+.DS_Store
+Thumbs.db

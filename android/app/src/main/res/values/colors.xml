@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The site's dark background, so there is no white flash before it loads. -->
+    <color name="proggaa_bg">#FF110C1D</color>
+    <color name="proggaa_primary">#FF8B5CF6</color>
+</resources>
