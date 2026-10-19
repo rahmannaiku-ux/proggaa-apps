@@ -51,11 +51,12 @@ installer closes, updates and reopens the app. That window is the only one allow
 
 It is built to feel like a native app rather than a website in a frame:
 
-- **Native tab bar** (`TabBar.kt`): Home, Learn, Exams, Community and Chats, drawn natively in the site's style. Each
-  tab is its own web view with its own history, so switching tabs keeps your place, like a real app. Tapping the
-  open tab goes back to its first page (or scrolls to the top). Chats shows an unread badge (from the site's
-  `/api/app/badges`). The bar hides while typing and on the login, mentor and admin screens. From version 1.0.4 the
-  site hides its own bottom bar inside the app (`app-mode.tsx` adds `proggaa-app-tabs`).
+- **Native tab bar** (`TabBar.kt`): Home, Learn, Exams, Community and Chats, drawn natively in the site's style, with a
+  small vibration on tap and an unread badge on Chats (from the site's `/api/app/badges`). There is one page shared by
+  every tab: tapping a tab moves it inside the site without a reload (the site's `window.__proggaaNavigate`, set by
+  `app-mode.tsx`), so menus close and everything stays in step, and the highlighted tab always follows where the page
+  really is, however you got there. Tapping the open tab again scrolls to the top. The bar hides while typing and on
+  the login, mentor and admin screens. From version 1.0.4 the site hides its own bottom bar inside the app.
 - **Splash screen** (Android 12+ style, also on older phones): the logo on the site's deep purple, kept until the first
   page has drawn, so the app never flashes a blank page.
 - **Icon**: an adaptive icon with the logo inside Android's safe zone on a purple gradient, so launchers don't crop it.
