@@ -42,16 +42,18 @@ new release. A release is only needed when the app itself changes (updater, noti
 `src-tauri/src/lib.rs` opens one window on the start page, keeps a single copy running (a second launch focuses the
 first), remembers the window size and position, and runs the updater. Updates come from
 `https://github.com/rahmannaiku-ux/proggaa-apps/releases/latest/download/latest.json`. The installer downloads only if
-its signature matches the public key in `tauri.conf.json`. The person is asked first ("Update now" / "Later"), the
-download progress shows in the window title, and the installer closes, updates and reopens the app.
+its signature matches the public key in `tauri.conf.json`. The person is asked first in a small update window in the
+website's style (`dist/update.html`: what's new, the version jump, "Update now" / "Later", then a progress bar), and the
+installer closes, updates and reopens the app. That window is the only one allowed to call the app's update commands
+(`capabilities/updater.json`).
 
 ### Android (`android/`)
 
 - `MainActivity.kt`: the web view, file and video picking for uploads (reels, photos, assignments), downloads through
   Android's download manager (with the session cookie), full-screen video, the back button, the offline screen, edge-to-edge
   layout that keeps clear of the keyboard, and opening the page a notification points to.
-- `AppUpdater.kt`: reads `android-latest.json`, offers the update, downloads with a progress bar, checks the SHA-256 and
-  opens the system installer. The first time, Android asks the person to allow Proggaa to install apps.
+- `AppUpdater.kt` and `UpdateDialog.kt`: reads `android-latest.json`, offers the update in a dialog drawn in the website's
+  style, downloads with a progress bar, checks the SHA-256 and opens the system installer. The first time, Android asks the person to allow Proggaa to install apps.
 - `NotificationWorker.kt`: a background job (WorkManager, about every 15 minutes with a connection) calls the site's
   `GET /api/app/notifications?after=…` with the web view's session cookie and shows new unread notifications. Tapping one
   opens its page. A notification the site updates in place (for example, more messages in the same chat) replaces the
@@ -81,6 +83,13 @@ update a release build or the other way round, because they're signed with diffe
 **Scripts:** `npm test` checks the update-manifest code.
 
 ## Releasing an update
+
+**From the website (easiest):** Admin → **Apps** on prooggaa.com. Type the new version and what's new, press
+**Publish**, and the page shows the build until it's live. The same page lists every release with its downloads, can
+withdraw a broken release, and sets the oldest version people may keep using (older apps are asked to update before
+they continue). It runs the Release workflow below through the GitHub API (needs `APPS_GITHUB_TOKEN` on Vercel).
+
+**From your computer:**
 
 1. Set the new version (for both apps):
    ```bash

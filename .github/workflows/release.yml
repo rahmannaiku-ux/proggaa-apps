@@ -4,8 +4,10 @@
 #   https://github.com/rahmannaiku-ux/proggaa-apps/releases/latest/download/android-latest.json  (Android)
 # and the website links to .../latest/download/Proggaa-Setup.exe and .../Proggaa.apk.
 #
-# Triggered by pushing a tag vMAJOR.MINOR.PATCH equal to the version in
-# package.json (see README: "Releasing an update").
+# Started either by pushing a tag vMAJOR.MINOR.PATCH equal to the version in
+# package.json (see README: "Releasing an update"), or from the website's
+# admin panel (Admin -> Apps), which runs this workflow with a version and
+# release notes: the first job then sets the version, commits and tags it.
 #
 # Repository secrets (Settings -> Secrets and variables -> Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           the Windows updater's private key (file contents)
@@ -18,12 +20,20 @@ name: Release
 on:
   push:
     tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "New version (MAJOR.MINOR.PATCH), higher than the current one"
+        required: true
+      notes:
+        description: "What's new (shown in the apps' update prompt)"
+        required: false
 
 permissions:
   contents: write
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
   cancel-in-progress: false
 
 jobs:
@@ -31,17 +41,35 @@ jobs:
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.v.outputs.version }}
+      tag: ${{ steps.v.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: From the admin panel, set the version, commit and tag it
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          VERSION: ${{ inputs.version }}
+          NOTES: ${{ inputs.notes }}
+        run: |
+          VERSION="${VERSION#v}"
+          git config user.name "Proggaa release"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          node scripts/set-version.mjs "$VERSION"
+          git commit -am "Proggaa $VERSION"
+          git tag -a "v$VERSION" -m "Proggaa $VERSION" -m "${NOTES:-Improvements and fixes.}"
+          git push origin "HEAD:${GITHUB_REF_NAME}" "v$VERSION"
       - id: v
         name: The tag must match package.json
         run: |
           VERSION=$(node -p "require('./package.json').version")
-          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
-            echo "::error::Tag $GITHUB_REF_NAME doesn't match package.json version $VERSION. Run: node scripts/set-version.mjs <version>"
+          if [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]; then TAG="v$VERSION"; else TAG="$GITHUB_REF_NAME"; fi
+          if [ "v$VERSION" != "$TAG" ]; then
+            echo "::error::Tag $TAG doesn't match package.json version $VERSION. Run: node scripts/set-version.mjs <version>"
             exit 1
           fi
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
       - name: The signing secrets must be set
         env:
           A: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY != '' }}
@@ -61,6 +89,8 @@ jobs:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
@@ -91,6 +121,8 @@ jobs:
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.check.outputs.tag }}
       - uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -125,32 +157,38 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: ${{ needs.check.outputs.tag }}
           fetch-depth: 0
       - uses: actions/download-artifact@v4
         with:
           path: build
       - name: Release notes from the tag message
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
-          git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
-          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
+          git fetch --force origin "refs/tags/$TAG:refs/tags/$TAG"
+          if [ "$(git cat-file -t "$TAG")" = "tag" ]; then
             # The body is what's new; the subject ("Proggaa 1.0.1") is already the release title.
-            git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > notes.md
-            [ -s notes.md ] || git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME" > notes.md
+            git tag -l --format='%(contents:body)' "$TAG" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > notes.md
+            [ -s notes.md ] || git tag -l --format='%(contents:subject)' "$TAG" > notes.md
           fi
           [ -s notes.md ] || echo "Proggaa ${{ needs.check.outputs.version }}" > notes.md
           cat notes.md
       - name: Collect the files and write the update manifests
+        env:
+          TAG: ${{ needs.check.outputs.tag }}
         run: >
           node scripts/make-manifests.mjs
-          --version "${{ needs.check.outputs.version }}" --tag "$GITHUB_REF_NAME"
+          --version "${{ needs.check.outputs.version }}" --tag "$TAG"
           --in build --out release-assets --notes-file notes.md
       - name: Publish
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.check.outputs.tag }}
         run: |
           # A draft first, so no app sees a manifest before its files are uploaded.
-          gh release create "$GITHUB_REF_NAME" release-assets/* \
+          gh release create "$TAG" release-assets/* \
             --title "Proggaa ${{ needs.check.outputs.version }}" \
             --notes-file notes.md \
             --draft
-          gh release edit "$GITHUB_REF_NAME" --draft=false --latest
+          gh release edit "$TAG" --draft=false --latest
