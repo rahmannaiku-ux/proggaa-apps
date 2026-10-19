@@ -133,7 +133,9 @@ jobs:
         run: |
           git fetch --force origin "refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
           if [ "$(git cat-file -t "$GITHUB_REF_NAME")" = "tag" ]; then
-            git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$GITHUB_REF_NAME" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > notes.md
+            # The body is what's new; the subject ("Proggaa 1.0.1") is already the release title.
+            git tag -l --format='%(contents:body)' "$GITHUB_REF_NAME" | sed -e :a -e '/^\n*$/{$d;N;ba' -e '}' > notes.md
+            [ -s notes.md ] || git tag -l --format='%(contents:subject)' "$GITHUB_REF_NAME" > notes.md
           fi
           [ -s notes.md ] || echo "Proggaa ${{ needs.check.outputs.version }}" > notes.md
           cat notes.md

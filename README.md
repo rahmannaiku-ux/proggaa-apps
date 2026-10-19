@@ -10,7 +10,7 @@ People download the apps from **[prooggaa.com/download](https://prooggaa.com/dow
 |---|---|---|
 | Built with | [Tauri 2](https://tauri.app) (Rust + Microsoft Edge WebView2) | Kotlin, Android WebView |
 | Folder | [`desktop/`](desktop) | [`android/`](android) |
-| Installer | `Proggaa-Setup.exe` (about 3 MB, installs per user, no admin needed) | `Proggaa.apk` |
+| Installer | `Proggaa-Setup.exe` (about 2 MB, installs per user, no admin needed) | `Proggaa.apk` (under 1 MB) |
 | Updates | Checks on launch and every 6 hours; signed with the updater key | Checks on launch (at most every 4 hours); SHA-256 checked, and Android only accepts an APK signed with the same key |
 | Notifications | Shown inside the site | Phone notifications, checked about every 15 minutes, even when the app is closed |
 | Needs | Windows 10/11, 64-bit | Android 7.0 or newer |
@@ -87,10 +87,11 @@ update a release build or the other way round, because they're signed with diffe
    node scripts/set-version.mjs 1.0.1
    ```
    It must be higher than the current one. Android's version code is worked out from it: 1.0.1 → 10001.
-2. Commit, then tag with what's new. The tag message becomes the release notes the apps show:
+2. Commit, then tag. The tag's title is the release name, and its second paragraph (what's new) becomes the release
+   notes the apps show in their update prompt:
    ```bash
    git commit -am "Proggaa 1.0.1"
-   git tag -a v1.0.1 -m "Faster start-up and fixes for file uploads"
+   git tag -a v1.0.1 -m "Proggaa 1.0.1" -m "Faster start-up and fixes for file uploads."
    git push && git push origin v1.0.1
    ```
 3. The **Release** workflow (`.github/workflows/release.yml`) tests and builds both apps, signs them, and publishes the
