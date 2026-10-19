@@ -57,9 +57,11 @@ import java.net.HttpURLConnection
 import java.net.URL
 
 /**
- * The app: prooggaa.com shown in native tabs. Each tab of the bottom bar
- * (Home, Learn, Exams, Community, Chats) keeps its own page and history,
- * like a real app, with unread badges. Around the pages: a splash screen,
+ * The app: prooggaa.com with a native tab bar (Home, Learn, Exams,
+ * Community, Chats, with unread badges). There is one page, shared by every
+ * tab: the tab bar moves it around inside the site (no reload), and always
+ * lights up the tab the page belongs to, so the app and the site never
+ * disagree. Around the page: a splash screen,
  * bars coloured like the page, file and video picking for uploads,
  * downloads, full-screen video, the back button, an offline screen,
  * opening notifications in the right tab, and updates. The site gets no
@@ -74,16 +76,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var offline: View
     private lateinit var updater: AppUpdater
 
-    /** One web view per tab, made the first time the tab is opened. */
-    private val tabs = arrayOfNulls<WebView>(Site.TABS.size)
-    private var current = 0
+    private lateinit var webView: WebView
     private var keyboardOpen = false
-    /** Whether each tab's page has drawn at least once (until then a loading screen covers it). */
-    private val drawn = BooleanArray(Site.TABS.size)
-    /** The colour of the page being shown, so new tabs and the loading screen match it (light or dark). */
-    private var pageColor = 0
-    private lateinit var tabLoading: View
-    private var preloadStarted = false
 
     private var fileCallback: ValueCallback<Array<Uri>>? = null
     private var fullscreenView: View? = null
@@ -130,19 +124,11 @@ class MainActivity : ComponentActivity() {
             progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.TRANSPARENT)
         }
         offline = buildOfflineView()
-        pageColor = ContextCompat.getColor(this, R.color.proggaa_bg)
-        tabLoading = FrameLayout(this).apply {
-            isVisible = false
-            isClickable = true
-            setBackgroundColor(pageColor)
-            addView(ProgressBar(context).apply {
-                indeterminateTintList = ContextCompat.getColorStateList(context, R.color.proggaa_accent)
-            }, FrameLayout.LayoutParams(dp(36), dp(36), Gravity.CENTER))
-        }
         tabBar = TabBar(this) { index, reselected -> onTabSelected(index, reselected) }.apply { isVisible = false }
 
+        webView = newWebView()
+        content.addView(webView, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         content.addView(progress, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(3), Gravity.TOP))
-        content.addView(tabLoading, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         content.addView(offline, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
         val column = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -167,11 +153,9 @@ class MainActivity : ComponentActivity() {
 
         onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                val web = tabs[current]
                 when {
                     fullscreenView != null -> exitFullscreen()
-                    web != null && web.canGoBack() && !offline.isVisible -> web.goBack()
-                    current != 0 && tabBar.isVisible -> showTab(0)
+                    webView.canGoBack() && !offline.isVisible -> webView.goBack()
                     else -> {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
@@ -181,18 +165,8 @@ class MainActivity : ComponentActivity() {
             }
         })
 
-        val restoredTab = savedInstanceState?.getInt(KEY_CURRENT, -1) ?: -1
-        if (restoredTab >= 0) {
-            for (i in tabs.indices) {
-                val state = savedInstanceState?.getBundle("$KEY_TAB$i") ?: continue
-                tabFor(i, initialUrl = null).restoreState(state)
-            }
-            showTab(restoredTab, animate = false)
-        } else {
-            val page = pageFromIntent(intent)
-            val start = page?.let { Site.tabFor(Site.pathOf(it) ?: "/") } ?: 0
-            tabFor(start, initialUrl = page ?: Site.START)
-            showTab(start, animate = false)
+        if (savedInstanceState == null || webView.restoreState(savedInstanceState) == null) {
+            webView.loadUrl(pageFromIntent(intent) ?: Site.START)
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU &&
@@ -208,96 +182,32 @@ class MainActivity : ComponentActivity() {
     // Tabs
     // ---------------------------------------------------------------------
 
-    private fun tabRoot(index: Int) = Site.BASE + Site.TABS[index].path
-
-    /** The web view of a tab, made (and pointed at `initialUrl` or the tab's first page) when first needed. */
-    private fun tabFor(index: Int, initialUrl: String? = tabRoot(index)): WebView {
-        tabs[index]?.let { return it }
-        val web = newWebView()
-        // INVISIBLE, not GONE: a hidden tab keeps the full screen size while its page loads,
-        // so the page is laid out for the phone's width instead of shrunk to a desktop width.
-        web.visibility = View.INVISIBLE
-        content.addView(web, 0, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        tabs[index] = web
-        initialUrl?.let { web.loadUrl(it) }
-        return web
-    }
-
-    private fun showTab(index: Int, animate: Boolean = true) {
-        val next = tabFor(index)
-        val previous = tabs[current]
-        current = index
-        tabBar.select(index)
-        previous?.animate()?.cancel()
-        next.animate().cancel()
-        next.visibility = View.VISIBLE
-        if (previous !== next) previous?.visibility = View.INVISIBLE
-        if (animate && previous !== next) {
-            // A quick fade-in, like switching tabs in a native app.
-            next.alpha = 0.35f
-            next.animate().alpha(1f).setDuration(140).start()
-        } else {
-            next.alpha = 1f
-        }
-        next.requestFocus()
-        progress.isVisible = false
-        offline.isVisible = false
-        // A tab that hasn't drawn yet shows a calm loading screen in the page's colour, never a blank one.
-        tabLoading.setBackgroundColor(pageColor)
-        tabLoading.isVisible = !drawn[index]
-        updateTabBarVisibility()
-        if (drawn[index]) matchBarsToPage()
-    }
-
     /**
-     * Once signed in and the first page is up, quietly loads the other tabs one
-     * by one, so switching to them is instant.
+     * Goes to a tab's page inside the site, the way a link in the site would
+     * (no reload, so menus close and everything stays in step). A page without
+     * the site's helper is simply loaded.
      */
-    private fun preloadTabs() {
-        if (preloadStarted) return
-        preloadStarted = true
-        lifecycleScope.launch {
-            for (i in tabs.indices) {
-                delay(PRELOAD_GAP_MS)
-                if (tabs[i] == null && tabBar.isVisible) tabFor(i)
-            }
+    private fun navigate(path: String) {
+        val js = "(function(){if(window.__proggaaNavigate){window.__proggaaNavigate(" + JSONObject.quote(path) + ");return 1}return 0})()"
+        webView.evaluateJavascript(js) { result ->
+            if (result != "1") webView.loadUrl(Site.BASE + path)
         }
     }
 
     private fun onTabSelected(index: Int, reselected: Boolean) {
-        if (!reselected) {
-            showTab(index)
-            return
-        }
-        // Tapping the open tab again: back to its first page, or to the top of it.
-        val web = tabs[index] ?: return
-        if (Site.pathOf(web.url) == Site.TABS[index].path) {
-            web.evaluateJavascript("window.scrollTo({top:0,behavior:'smooth'})", null)
+        val path = Site.TABS[index].path
+        if (reselected && Site.pathOf(webView.url) == path) {
+            // Tapping the open tab again on its own page: back to the top.
+            webView.evaluateJavascript("window.scrollTo({top:0,behavior:'smooth'})", null)
         } else {
-            web.loadUrl(tabRoot(index))
+            navigate(path)
         }
     }
 
     private fun updateTabBarVisibility() {
-        if (!::tabBar.isInitialized) return
-        val path = Site.pathOf(tabs[current]?.url)
+        if (!::tabBar.isInitialized || !::webView.isInitialized) return
+        val path = Site.pathOf(webView.url)
         tabBar.isVisible = !keyboardOpen && path != null && Site.showsTabBar(path) && fullscreenView == null
-    }
-
-    /** Signed out: the other tabs show an old session's pages, so they start again after the next sign-in. */
-    private fun forgetOtherTabs() {
-        for (i in tabs.indices) {
-            if (i == current) continue
-            tabs[i]?.let {
-                content.removeView(it)
-                it.destroy()
-            }
-            tabs[i] = null
-        }
-        for (i in tabs.indices) {
-            tabBar.setBadge(i, 0)
-            if (i != current) drawn[i] = false
-        }
     }
 
     // ---------------------------------------------------------------------
@@ -307,7 +217,7 @@ class MainActivity : ComponentActivity() {
     @SuppressLint("SetJavaScriptEnabled")
     private fun newWebView(): WebView {
         val web = WebView(this)
-        web.setBackgroundColor(pageColor)
+        web.setBackgroundColor(ContextCompat.getColor(this, R.color.proggaa_bg))
         CookieManager.getInstance().setAcceptThirdPartyCookies(web, true) // YouTube lesson videos
         // The site scrolls itself; no Android glow at the edges of the page.
         web.overScrollMode = View.OVER_SCROLL_NEVER
@@ -349,7 +259,7 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
-                if (view !== tabs[current]) return
+                if (view !== webView) return
                 mainFrameFailed = false
                 // Only slow loads show the bar: a quick page change should feel instant, like an app.
                 progress.removeCallbacks(showProgress)
@@ -357,20 +267,13 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
-                val index = tabs.indexOfFirst { it === view }
-                if (index < 0) return
-                drawn[index] = true
-                if (index == current) {
-                    tabLoading.isVisible = false
-                    firstPageShown = true
-                    matchBarsToPage()
-                }
+                firstPageShown = true
+                matchBarsToPage()
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
-                tabs.indexOfFirst { it === view }.takeIf { it >= 0 }?.let { drawn[it] = true }
                 CookieManager.getInstance().flush()
-                if (view !== tabs[current]) return
+                if (view !== webView) return
                 progress.removeCallbacks(showProgress)
                 progress.isVisible = false
                 if (!mainFrameFailed) offline.isVisible = false
@@ -380,11 +283,11 @@ class MainActivity : ComponentActivity() {
 
             override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
                 // The site changes pages without a full load.
-                if (view === tabs[current]) view.postDelayed({ pageChanged(view.url) }, 300)
+                if (view === webView) view.postDelayed({ pageChanged(view.url) }, 300)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
-                if (request.isForMainFrame && view === tabs[current]) {
+                if (request.isForMainFrame && view === webView) {
                     mainFrameFailed = true
                     firstPageShown = true
                     offline.isVisible = true
@@ -401,7 +304,7 @@ class MainActivity : ComponentActivity() {
 
         web.webChromeClient = object : WebChromeClient() {
             override fun onProgressChanged(view: WebView, newProgress: Int) {
-                if (view === tabs[current]) progress.progress = newProgress
+                if (view === webView) progress.progress = newProgress
             }
 
             override fun onShowFileChooser(view: WebView, callback: ValueCallback<Array<Uri>>, params: FileChooserParams): Boolean {
@@ -442,13 +345,10 @@ class MainActivity : ComponentActivity() {
     /** After every page change in the open tab: tab bar, bar colours, badges, and sign-out. */
     private fun pageChanged(url: String?) {
         val path = Site.pathOf(url)
-        if (path == "/login" || path == "/register") {
-            forgetOtherTabs()
-            preloadStarted = false
-        }
-        tabLoading.isVisible = false
+        // The tab bar always shows where the page really is, however you got there.
+        if (path != null) tabBar.select(Site.tabFor(path))
+        if (path == "/login" || path == "/register") for (i in Site.TABS.indices) tabBar.setBadge(i, 0)
         updateTabBarVisibility()
-        if (tabBar.isVisible) preloadTabs()
         matchBarsToPage()
         if (tabBar.isVisible && SystemClock.uptimeMillis() - lastBadgeCheck > 20_000) refreshBadges()
     }
@@ -590,7 +490,7 @@ class MainActivity : ComponentActivity() {
      * or dark when the site is in dark mode), so the app looks all of a piece.
      */
     private fun matchBarsToPage() {
-        val web = tabs[current] ?: return
+        val web = webView
         web.evaluateJavascript(
             "(function(){var e=document.querySelector('header')||document.body;" +
                 "var c=getComputedStyle(e).backgroundColor;" +
@@ -599,7 +499,6 @@ class MainActivity : ComponentActivity() {
             val match = Regex("""rgba?\((\d+),\s*(\d+),\s*(\d+)""").find(raw ?: return@evaluateJavascript) ?: return@evaluateJavascript
             val (r, g, b) = match.destructured
             val color = Color.rgb(r.toInt(), g.toInt(), b.toInt())
-            pageColor = color
             setBarsColor(color)
             tabBar.setPageColor(color)
         }
@@ -641,8 +540,7 @@ class MainActivity : ComponentActivity() {
             setTextColor(Color.WHITE)
             backgroundTintList = ContextCompat.getColorStateList(context, R.color.proggaa_primary)
             setOnClickListener {
-                val web = tabs[current] ?: return@setOnClickListener
-                if (web.url != null) web.reload() else web.loadUrl(tabRoot(current))
+                if (webView.url != null) webView.reload() else webView.loadUrl(Site.START)
             }
         }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(20) })
     }
@@ -665,17 +563,13 @@ class MainActivity : ComponentActivity() {
             updater.check(manual = true)
             return
         }
-        val page = pageFromIntent(intent) ?: return
-        val index = Site.tabFor(Site.pathOf(page) ?: "/")
-        val web = tabFor(index, initialUrl = null)
-        web.loadUrl(page)
-        showTab(index)
+        pageFromIntent(intent)?.let { webView.loadUrl(it) }
     }
 
     override fun onResume() {
         super.onResume()
         inForeground = true
-        tabs.forEach { it?.onResume() }
+        webView.onResume()
         updater.onResume()
         updater.check(manual = false)
         startBadgeLoop()
@@ -684,26 +578,21 @@ class MainActivity : ComponentActivity() {
     override fun onPause() {
         inForeground = false
         badgeJob?.cancel()
-        tabs.forEach { it?.onPause() }
+        webView.onPause()
         CookieManager.getInstance().flush()
         super.onPause()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        outState.putInt(KEY_CURRENT, current)
-        tabs.forEachIndexed { i, web -> web?.let { outState.putBundle("$KEY_TAB$i", Bundle().also { b -> it.saveState(b) }) } }
+        webView.saveState(outState)
     }
 
     override fun onDestroy() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
-        tabs.forEach {
-            it?.let { web ->
-                content.removeView(web)
-                web.destroy()
-            }
-        }
+        content.removeView(webView)
+        webView.destroy()
         super.onDestroy()
     }
 
@@ -713,12 +602,10 @@ class MainActivity : ComponentActivity() {
         const val EXTRA_URL = "url"
         /** Set by the "update available" notification: open the update prompt. */
         const val EXTRA_CHECK_UPDATE = "checkUpdate"
-        private const val KEY_CURRENT = "tab"
-        private const val KEY_TAB = "tab-state-"
         private const val SPLASH_MAX_MS = 4000L
         private const val PROGRESS_DELAY_MS = 350L
         private const val BADGE_EVERY_MS = 60_000L
-        private const val PRELOAD_GAP_MS = 900L
+
 
         /** Read by NotificationWorker: while the app is open the site shows notifications itself. */
         @Volatile
