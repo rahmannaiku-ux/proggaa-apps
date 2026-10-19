@@ -7,6 +7,10 @@ import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
+import android.graphics.Color
+import android.os.SystemClock
+import androidx.core.graphics.ColorUtils
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
@@ -60,6 +64,10 @@ class MainActivity : ComponentActivity() {
     private var fullscreenView: View? = null
     private var fullscreenCallback: WebChromeClient.CustomViewCallback? = null
     private var mainFrameFailed = false
+    /** The splash screen stays up until the first page has drawn (or a few seconds pass). */
+    private var firstPageShown = false
+    private val startedAt = SystemClock.uptimeMillis()
+    private val showProgress = Runnable { if (!firstPageShown || progress.progress < 100) progress.isVisible = true }
 
     private val pickFiles = registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
         val data = result.data
@@ -77,6 +85,9 @@ class MainActivity : ComponentActivity() {
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
+        installSplashScreen().setKeepOnScreenCondition {
+            !firstPageShown && SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS
+        }
         super.onCreate(savedInstanceState)
         // Draw edge to edge and pad for the status bar, navigation bar and keyboard ourselves.
         WindowCompat.setDecorFitsSystemWindows(window, false)
@@ -90,7 +101,9 @@ class MainActivity : ComponentActivity() {
         webView = WebView(this).apply { setBackgroundColor(ContextCompat.getColor(context, R.color.proggaa_bg)) }
         progress = ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal).apply {
             max = 100
-            progressTintList = ContextCompat.getColorStateList(context, R.color.proggaa_primary)
+            isVisible = false
+            progressTintList = ContextCompat.getColorStateList(context, R.color.proggaa_accent)
+            progressBackgroundTintList = android.content.res.ColorStateList.valueOf(Color.TRANSPARENT)
         }
         offline = buildOfflineView()
 
@@ -141,6 +154,9 @@ class MainActivity : ComponentActivity() {
             setAcceptCookie(true)
             setAcceptThirdPartyCookies(webView, true) // YouTube lesson videos
         }
+        // The site scrolls itself; no Android glow at the edges of the page.
+        webView.overScrollMode = View.OVER_SCROLL_NEVER
+        webView.isVerticalScrollBarEnabled = false
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
@@ -171,19 +187,31 @@ class MainActivity : ComponentActivity() {
 
             override fun onPageStarted(view: WebView, url: String?, favicon: Bitmap?) {
                 mainFrameFailed = false
-                progress.isVisible = true
+                // Only slow loads show the bar: a quick page change should feel instant, like an app.
+                progress.removeCallbacks(showProgress)
+                progress.postDelayed(showProgress, PROGRESS_DELAY_MS)
             }
 
             override fun onPageFinished(view: WebView, url: String?) {
+                progress.removeCallbacks(showProgress)
                 progress.isVisible = false
                 if (!mainFrameFailed) offline.isVisible = false
+                firstPageShown = true
+                matchBarsToPage()
                 CookieManager.getInstance().flush()
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView, url: String?, isReload: Boolean) {
+                // The site changes pages without a full load; recolour the bars once it has drawn.
+                view.postDelayed({ matchBarsToPage() }, 350)
             }
 
             override fun onReceivedError(view: WebView, request: WebResourceRequest, error: WebResourceError) {
                 if (request.isForMainFrame) {
                     mainFrameFailed = true
+                    firstPageShown = true
                     offline.isVisible = true
+                    setBarsColor(ContextCompat.getColor(this@MainActivity, R.color.proggaa_bg))
                 }
             }
 
@@ -317,6 +345,31 @@ class MainActivity : ComponentActivity() {
         fullscreenCallback = null
     }
 
+    /**
+     * Colours the status and navigation bars like the page under them (cream,
+     * or dark when the site is in dark mode), so the app looks edge to edge.
+     */
+    private fun matchBarsToPage() {
+        webView.evaluateJavascript(
+            "(function(){var e=document.querySelector('header')||document.body;" +
+                "var c=getComputedStyle(e).backgroundColor;" +
+                "if(!c||c==='rgba(0, 0, 0, 0)'||c==='transparent')c=getComputedStyle(document.body).backgroundColor;return c})()"
+        ) { raw ->
+            val match = Regex("""rgba?\((\d+),\s*(\d+),\s*(\d+)""").find(raw ?: return@evaluateJavascript) ?: return@evaluateJavascript
+            val (r, g, b) = match.destructured
+            setBarsColor(Color.rgb(r.toInt(), g.toInt(), b.toInt()))
+        }
+    }
+
+    private fun setBarsColor(color: Int) {
+        root.setBackgroundColor(color)
+        val light = ColorUtils.calculateLuminance(color) > 0.5
+        WindowInsetsControllerCompat(window, window.decorView).apply {
+            isAppearanceLightStatusBars = light
+            isAppearanceLightNavigationBars = light
+        }
+    }
+
     private fun buildOfflineView(): View = LinearLayout(this).apply {
         orientation = LinearLayout.VERTICAL
         gravity = Gravity.CENTER
@@ -390,6 +443,8 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_URL = "url"
+        private const val SPLASH_MAX_MS = 4000L
+        private const val PROGRESS_DELAY_MS = 350L
 
         /** Read by NotificationWorker: while the app is open the site shows notifications itself. */
         @Volatile

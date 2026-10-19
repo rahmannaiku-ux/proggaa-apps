@@ -10,4 +10,5 @@
     <color name="proggaa_accent">#FF6B1FC1</color>    <!-- electric violet -->
     <color name="proggaa_xp">#FFFAB719</color>        <!-- golden yellow -->
     <color name="proggaa_danger">#FFBC2F1A</color>
+    <color name="proggaa_splash">#FF2A1645</color>     <!-- the site's sidebar purple -->
 </resources>

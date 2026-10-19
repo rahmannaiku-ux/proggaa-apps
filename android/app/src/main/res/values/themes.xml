@@ -1,10 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <!-- Shown while the app starts: the logo on deep purple (Android 12+ animates it in). -->
+    <style name="Theme.Proggaa.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/proggaa_splash</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
+        <item name="windowSplashScreenAnimationDuration">600</item>
+        <item name="postSplashScreenTheme">@style/Theme.Proggaa</item>
+    </style>
+
     <style name="Theme.Proggaa" parent="android:Theme.Material.Light.NoActionBar">
         <item name="android:windowBackground">@color/proggaa_bg</item>
         <item name="android:colorAccent">@color/proggaa_primary</item>
         <item name="android:colorPrimary">@color/proggaa_primary</item>
-        <item name="android:statusBarColor">@color/proggaa_bg</item>
-        <item name="android:navigationBarColor">@color/proggaa_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
     </style>
 </resources>
