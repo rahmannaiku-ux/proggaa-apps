@@ -1,10 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Shown while the app starts: the logo on deep purple (Android 12+ animates it in). -->
+    <!-- Shown while the app starts: the logo on white (Android 12+ animates it in). -->
     <style name="Theme.Proggaa.Starting" parent="Theme.SplashScreen">
         <item name="windowSplashScreenBackground">@color/proggaa_splash</item>
         <item name="windowSplashScreenAnimatedIcon">@drawable/splash_logo</item>
         <item name="windowSplashScreenAnimationDuration">600</item>
+        <!-- Dark status bar icons on the white splash. -->
+        <item name="android:windowLightStatusBar">true</item>
         <item name="postSplashScreenTheme">@style/Theme.Proggaa</item>
     </style>
 

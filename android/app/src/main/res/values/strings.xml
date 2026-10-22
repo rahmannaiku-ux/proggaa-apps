@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Proggaa</string>
+    <string name="app_name">Prooggaa</string>
     <string name="channel_general">Notifications</string>
     <string name="channel_general_desc">Messages, replies, class reminders and other updates from Proggaa</string>
     <string name="channel_updates">App updates</string>

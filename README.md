@@ -11,7 +11,7 @@ People download the apps from **[prooggaa.com/download](https://prooggaa.com/dow
 | Built with | [Tauri 2](https://tauri.app) (Rust + Microsoft Edge WebView2) | Kotlin, Android WebView |
 | Folder | [`desktop/`](desktop) | [`android/`](android) |
 | Installer | `Proggaa-Setup.exe` (about 2 MB, installs per user, no admin needed) | `Proggaa.apk` (under 1 MB) |
-| Updates | Checks on launch and every 6 hours; signed with the updater key | Checks on launch (at most every 4 hours); SHA-256 checked, and Android only accepts an APK signed with the same key |
+| Updates | Checks on every start (again after 2 minutes if offline), then every 6 hours; signed with the updater key | Checks on every start, then when reopened (at most every 30 minutes); SHA-256 checked, and Android only accepts an APK signed with the same key |
 | Notifications | Shown inside the site | Phone notifications, checked about every 15 minutes, even when the app is closed |
 | Needs | Windows 10/11, 64-bit | Android 7.0 or newer |
 
@@ -59,9 +59,9 @@ It is built to feel like a native app rather than a website in a frame:
   `app-mode.tsx`), so menus close and everything stays in step, and the highlighted tab always follows where the page
   really is, however you got there. Tapping the open tab again scrolls to the top. The bar hides while typing and on
   the login, mentor and admin screens. From version 1.0.4 the site hides its own bottom bar inside the app.
-- **Splash screen** (Android 12+ style, also on older phones): the logo on the site's deep purple, kept until the first
+- **Splash screen** (Android 12+ style, also on older phones): the logo on white, kept until the first
   page has drawn, so the app never flashes a blank page.
-- **Icon**: an adaptive icon with the logo inside Android's safe zone on a purple gradient, so launchers don't crop it.
+- **Icon and name**: “Prooggaa” on the home screen, an adaptive icon with the logo inside Android's safe zone on white, so launchers don't crop it.
 - **Bars that match the page**: the status bar, navigation bar and tab bar take the page's colour (light or dark mode).
 - **Quieter loading**: no progress bar for quick page changes, no scroll bars or edge glow, no tap flashes or text
   selection on buttons (the site adds these touches when it sees the app).

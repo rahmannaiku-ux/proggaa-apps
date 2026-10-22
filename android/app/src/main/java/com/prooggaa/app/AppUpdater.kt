@@ -35,19 +35,24 @@ class AppUpdater(private val activity: ComponentActivity) {
     private val prefs = activity.getSharedPreferences("updater", Context.MODE_PRIVATE)
     private var pendingInstall: File? = null
     private var running: Job? = null
+    /** Until a check succeeds after the app starts, every opening checks (no half-hour wait). */
+    private var checkedSinceStart = false
 
     /**
-     * Automatic check (each time the app comes to the front, at most every half
-     * hour), or `manual` when the person asked.
+     * Automatic check (always when the app starts, then each time it comes to
+     * the front, at most every half hour), or `manual` when the person asked.
      */
     fun check(manual: Boolean) {
         if (running?.isActive == true) return
         val now = System.currentTimeMillis()
-        if (!manual && now - prefs.getLong(KEY_LAST_CHECK, 0) < AUTO_CHECK_EVERY_MS) return
+        if (!manual && checkedSinceStart && now - prefs.getLong(KEY_LAST_CHECK, 0) < AUTO_CHECK_EVERY_MS) return
         running = activity.lifecycleScope.launch {
             val release = withContext(Dispatchers.IO) { runCatching { fetchRelease() } }
             // Only a successful check counts: without a connection the next opening tries again.
-            if (release.isSuccess) prefs.edit().putLong(KEY_LAST_CHECK, now).apply()
+            if (release.isSuccess) {
+                checkedSinceStart = true
+                prefs.edit().putLong(KEY_LAST_CHECK, now).apply()
+            }
             release.onFailure {
                 if (manual) toast("Couldn't check for updates. Check your connection and try again.")
             }

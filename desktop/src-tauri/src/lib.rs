@@ -46,6 +46,8 @@ pub fn browser_target(url: &Url) -> Option<String> {
 const FIRST_CHECK_AFTER: Duration = Duration::from_secs(10);
 /// Look again this often while the app stays open.
 const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
+/// When a check couldn't reach GitHub (offline at start-up...), try again this soon.
+const RETRY_AFTER: Duration = Duration::from_secs(2 * 60);
 
 /// The title bar's colour: the site's sidebar purple (#271643, as 0x00BBGGRR),
 /// so the top of the window reads as part of the app rather than a black strip.
@@ -165,8 +167,8 @@ pub fn run() {
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(FIRST_CHECK_AFTER).await;
                 loop {
-                    check_for_update(&handle, false).await;
-                    tokio::time::sleep(CHECK_EVERY).await;
+                    let reached = check_for_update(&handle, false).await;
+                    tokio::time::sleep(if reached { CHECK_EVERY } else { RETRY_AFTER }).await;
                 }
             });
             Ok(())
@@ -186,7 +188,8 @@ async fn ask(app: &AppHandle, title: &str, message: String, buttons: MessageDial
 /// Looks for a newer version on GitHub and, if the person agrees, downloads
 /// it (signature-checked by the updater), installs it and reopens the app.
 /// `manual` = they asked: then "you're up to date" and errors are shown too.
-async fn check_for_update(app: &AppHandle, manual: bool) {
+/// Returns false when GitHub couldn't be reached.
+async fn check_for_update(app: &AppHandle, manual: bool) -> bool {
     let found = match app.updater() {
         Ok(updater) => updater.check().await,
         Err(err) => Err(err),
@@ -205,7 +208,7 @@ async fn check_for_update(app: &AppHandle, manual: bool) {
                 )
                 .await;
             }
-            return;
+            return true;
         }
         Err(err) => {
             if manual {
@@ -218,7 +221,7 @@ async fn check_for_update(app: &AppHandle, manual: bool) {
                 )
                 .await;
             }
-            return;
+            return false;
         }
     };
 
@@ -226,6 +229,7 @@ async fn check_for_update(app: &AppHandle, manual: bool) {
         *state.0.lock().unwrap() = Some(update);
     }
     show_update_window(app);
+    true
 }
 
 /// Opens the update window (or brings it to the front if it is already open).
