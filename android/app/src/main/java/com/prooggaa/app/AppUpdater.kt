@@ -201,7 +201,7 @@ class AppUpdater(private val activity: ComponentActivity) {
             pendingInstall = file
             AlertDialog.Builder(activity)
                 .setTitle("One more step")
-                .setMessage("To install updates, allow Proggaa to install apps. Turn on \"Allow from this source\", then come back.")
+                .setMessage("To install updates, allow Prooggaa to install apps. Turn on \"Allow from this source\", then come back.")
                 .setPositiveButton("Open settings") { _, _ ->
                     runCatching {
                         activity.startActivity(

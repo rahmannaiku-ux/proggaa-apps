@@ -59,7 +59,7 @@ class NotificationPrompt(
         }, wrap().apply { topMargin = dp(10) })
 
         content.addView(TextView(activity).apply {
-            text = "Get new messages, replies and everything else from Proggaa on your phone, even when the app is closed."
+            text = "Get new messages, replies and everything else from Prooggaa on your phone, even when the app is closed."
             setTextColor(color(R.color.proggaa_muted_ink))
             textSize = 14f
             gravity = Gravity.CENTER

@@ -35,6 +35,9 @@ android {
                 storePassword = keystorePassword
                 keyAlias = "proggaa"
                 keyPassword = keystorePassword
+                // v3 as well as v2: lets the signing key be rotated one day without breaking updates.
+                enableV2Signing = true
+                enableV3Signing = true
             }
         }
     }

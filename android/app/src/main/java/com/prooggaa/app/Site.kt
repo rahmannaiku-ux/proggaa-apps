@@ -36,6 +36,18 @@ object Site {
     /** New, unread notifications for the signed-in person (see the website's /api/app/notifications). */
     const val NOTIFICATIONS_API = "$BASE/api/app/notifications"
 
+    /** Pages that belong on the website, not in the app (checking a certificate is done in the browser). */
+    private val WEBSITE_ONLY = listOf("/certificates/verify")
+
+    /** Whether a prooggaa.com address is one of the website-only pages, to open in the browser. */
+    fun isWebsiteOnly(url: String?): Boolean {
+        val uri = runCatching { URI(url ?: return false) }.getOrNull() ?: return false
+        val host = uri.host?.lowercase() ?: return false
+        if (host != "prooggaa.com" && !host.endsWith(".prooggaa.com")) return false
+        val path = uri.path ?: return false
+        return WEBSITE_ONLY.any { under(path, it) }
+    }
+
     /** Whether a page should open inside the app; anything else goes to the browser or another app. */
     fun opensInApp(url: String): Boolean {
         val uri = runCatching { URI(url) }.getOrNull() ?: return false
@@ -79,10 +91,14 @@ object Site {
         else -> 0
     }
 
+    private val SIGN_IN_PAGES = listOf("/login", "/register", "/forgot-password", "/sign-in", "/sign-up")
+
+    /** The screens for signing in or up (back never returns to them once signed in). */
+    fun isSignInPage(path: String?): Boolean = path != null && SIGN_IN_PAGES.any { under(path, it) }
+
     /** Signing in, and the mentor and admin consoles (they have their own navigation), show no tab bar. */
     fun showsTabBar(path: String): Boolean =
-        listOf("/login", "/register", "/forgot-password", "/complete-profile", "/sign-in", "/sign-up", "/admin", "/mentor", "/live/manage", "/security")
-            .none { under(path, it) }
+        !isSignInPage(path) && listOf("/complete-profile", "/admin", "/mentor", "/live/manage", "/security").none { under(path, it) }
 
     /** The path of a site address ("/community/u/x" for https://prooggaa.com/community/u/x?y=1), or null. */
     fun pathOf(url: String?): String? {

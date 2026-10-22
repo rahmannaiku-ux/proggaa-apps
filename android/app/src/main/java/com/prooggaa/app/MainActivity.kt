@@ -54,8 +54,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
+import org.json.JSONTokener
 import java.net.HttpURLConnection
 import java.net.URL
+import kotlin.coroutines.resume
+import kotlin.coroutines.suspendCoroutine
 
 /**
  * The app: prooggaa.com with a native tab bar (Home, Learn, Exams,
@@ -112,6 +115,15 @@ class MainActivity : ComponentActivity() {
             !firstPageShown && SystemClock.uptimeMillis() - startedAt < SPLASH_MAX_MS
         }
         super.onCreate(savedInstanceState)
+        // Opened only to show a website-only page (e.g. a scanned certificate): hand it to the browser.
+        if (savedInstanceState == null) {
+            websiteOnlyLink(intent)?.let {
+                firstPageShown = true
+                openInBrowser(it)
+                finish()
+                return
+            }
+        }
         // Draw edge to edge and pad for the status bar, navigation bar and keyboard ourselves.
         WindowCompat.setDecorFitsSystemWindows(window, false)
         setBarsColor(ContextCompat.getColor(this, R.color.proggaa_bg))
@@ -157,7 +169,7 @@ class MainActivity : ComponentActivity() {
             override fun handleOnBackPressed() {
                 when {
                     fullscreenView != null -> exitFullscreen()
-                    webView.canGoBack() && !offline.isVisible -> webView.goBack()
+                    canGoBackInSite() -> webView.goBack()
                     else -> {
                         isEnabled = false
                         onBackPressedDispatcher.onBackPressed()
@@ -200,6 +212,19 @@ class MainActivity : ComponentActivity() {
         } else {
             navigate(path)
         }
+    }
+
+    /**
+     * Back goes back a page, except on Home (it leaves the app, like other apps)
+     * and when the page before is a sign-in screen: going back there would
+     * only bounce a signed-in person straight to Home again.
+     */
+    private fun canGoBackInSite(): Boolean {
+        if (offline.isVisible || !webView.canGoBack()) return false
+        if (Site.pathOf(webView.url) == Site.TABS[0].path) return false
+        val history = webView.copyBackForwardList()
+        val previous = history.getItemAtIndex(history.currentIndex - 1)?.url
+        return !Site.isSignInPage(Site.pathOf(previous))
     }
 
     private fun updateTabBarVisibility() {
@@ -255,6 +280,10 @@ class MainActivity : ComponentActivity() {
                     turnOnNotifications()
                     return true
                 }
+                if (request.isForMainFrame && Site.isWebsiteOnly(url)) {
+                    openInBrowser(url)
+                    return true
+                }
                 if (!request.isForMainFrame || Site.opensInApp(url)) return false
                 openOutside(url)
                 return true
@@ -269,6 +298,7 @@ class MainActivity : ComponentActivity() {
             }
 
             override fun onPageCommitVisible(view: WebView, url: String?) {
+                if (view !== webView) return
                 firstPageShown = true
                 matchBarsToPage()
             }
@@ -480,6 +510,10 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun download(url: String, userAgent: String, contentDisposition: String?, mimeType: String?) {
+        if (url.startsWith("blob:") || url.startsWith("data:")) {
+            saveFromPage(url)
+            return
+        }
         if (!url.startsWith("https://") && !url.startsWith("http://")) {
             Toast.makeText(this, "This file can't be saved from the app. Open the page in a browser to save it.", Toast.LENGTH_LONG).show()
             return
@@ -501,6 +535,69 @@ class MainActivity : ComponentActivity() {
             .onSuccess { Toast.makeText(this, "Downloading $name", Toast.LENGTH_SHORT).show() }
             .onFailure { Toast.makeText(this, "Couldn't start the download.", Toast.LENGTH_LONG).show() }
     }
+
+    /**
+     * A file the page made itself (a blob: or data: link, like the birthday
+     * card): Android's download manager can't fetch those, so the app reads it
+     * out of the page (the page gets no bridge into the app; the app asks)
+     * and saves it to Downloads.
+     */
+    private fun saveFromPage(url: String) {
+        if (url.startsWith("data:")) {
+            saveDataUrl(url)
+            return
+        }
+        val read = "(function(u){window.__proggaaSave=null;fetch(u).then(function(r){return r.blob()}).then(function(b){" +
+            "var f=new FileReader();f.onload=function(){window.__proggaaSave=f.result};f.readAsDataURL(b)})" +
+            ".catch(function(){window.__proggaaSave='error'})})(" + JSONObject.quote(url) + ")"
+        webView.evaluateJavascript(read, null)
+        lifecycleScope.launch {
+            repeat(SAVE_POLLS) {
+                delay(SAVE_POLL_MS)
+                val raw = suspendCoroutine { done ->
+                    webView.evaluateJavascript("(function(){var d=window.__proggaaSave;if(d)window.__proggaaSave=null;return d||null})()") { done.resume(it) }
+                }
+                val value = runCatching { JSONTokener(raw).nextValue() as? String }.getOrNull() ?: return@repeat
+                if (value.startsWith("data:")) saveDataUrl(value) else toast("Couldn't save the file.")
+                return@launch
+            }
+            toast("Couldn't save the file.")
+        }
+    }
+
+    /** Writes a "data:<type>;base64,..." file to Downloads as Proggaa-<date>.<ext>. */
+    private fun saveDataUrl(dataUrl: String) {
+        lifecycleScope.launch {
+            val name = withContext(Dispatchers.IO) {
+                runCatching {
+                    val comma = dataUrl.indexOf(',')
+                    val header = dataUrl.substring(5, comma) // after "data:"
+                    require(header.endsWith(";base64")) { "not base64" }
+                    val type = header.removeSuffix(";base64").substringBefore(';').ifEmpty { "application/octet-stream" }
+                    val bytes = android.util.Base64.decode(dataUrl.substring(comma + 1), android.util.Base64.DEFAULT)
+                    val ext = MimeTypeMap.getSingleton().getExtensionFromMimeType(type) ?: "bin"
+                    val name = "Prooggaa-" + java.text.SimpleDateFormat("yyyyMMdd-HHmmss", java.util.Locale.US).format(java.util.Date()) + ".$ext"
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                        val values = android.content.ContentValues().apply {
+                            put(android.provider.MediaStore.Downloads.DISPLAY_NAME, name)
+                            put(android.provider.MediaStore.Downloads.MIME_TYPE, type)
+                        }
+                        val uri = contentResolver.insert(android.provider.MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                            ?: error("no Downloads")
+                        contentResolver.openOutputStream(uri)!!.use { it.write(bytes) }
+                    } else {
+                        // Older Android needs a storage permission for the shared Downloads folder; the app's own folder doesn't.
+                        val dir = getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: error("no storage")
+                        java.io.File(dir, name).writeBytes(bytes)
+                    }
+                    name
+                }.getOrNull()
+            }
+            toast(if (name != null) "Saved $name to Downloads" else "Couldn't save the file.")
+        }
+    }
+
+    private fun toast(text: String) = Toast.makeText(this, text, Toast.LENGTH_LONG).show()
 
     private fun openOutside(url: String) {
         val intent = if (url.startsWith("intent:")) {
@@ -595,7 +692,7 @@ class MainActivity : ComponentActivity() {
             setPadding(0, dp(16), 0, dp(4))
         })
         addView(TextView(context).apply {
-            text = "Proggaa needs the internet. Check your connection and try again."
+            text = "Prooggaa needs the internet. Check your connection and try again."
             setTextColor(ContextCompat.getColor(context, R.color.proggaa_muted_ink))
             gravity = Gravity.CENTER
         })
@@ -619,13 +716,21 @@ class MainActivity : ComponentActivity() {
         intent ?: return null
         intent.getStringExtra(EXTRA_URL)?.let { return Site.pageFor(it) }
         val data = intent.dataString ?: return null
-        return if (intent.action == Intent.ACTION_VIEW && Site.opensInApp(data)) data else null
+        return if (intent.action == Intent.ACTION_VIEW && Site.opensInApp(data) && !Site.isWebsiteOnly(data)) data else null
     }
+
+    /** A prooggaa.com link opened with the app (a scanned certificate QR code...) that belongs in the browser. */
+    private fun websiteOnlyLink(intent: Intent?): String? =
+        intent?.takeIf { it.action == Intent.ACTION_VIEW }?.dataString?.takeIf { Site.isWebsiteOnly(it) }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         if (intent.getBooleanExtra(EXTRA_CHECK_UPDATE, false)) {
             updater.check(manual = true)
+            return
+        }
+        websiteOnlyLink(intent)?.let {
+            openInBrowser(it)
             return
         }
         pageFromIntent(intent)?.let { webView.loadUrl(it) }
@@ -656,8 +761,11 @@ class MainActivity : ComponentActivity() {
     override fun onDestroy() {
         fileCallback?.onReceiveValue(null)
         fileCallback = null
-        content.removeView(webView)
-        webView.destroy()
+        // (Not set up when the app only handed a link to the browser and closed.)
+        if (::webView.isInitialized) {
+            content.removeView(webView)
+            webView.destroy()
+        }
         super.onDestroy()
     }
 
@@ -674,6 +782,9 @@ class MainActivity : ComponentActivity() {
         private const val KEY_ASK_AGAIN_AT = "askAgainAt"
         private const val KEY_PERMISSION_ASKED = "permissionAsked"
         private const val NOTIFICATION_PROMPT_DELAY_MS = 1500L
+        /** Reading a file out of the page: look every 0.2 s, for up to 15 s. */
+        private const val SAVE_POLL_MS = 200L
+        private const val SAVE_POLLS = 75
         private const val ASK_AGAIN_AFTER_MS = 3 * 24 * 60 * 60 * 1000L
 
 

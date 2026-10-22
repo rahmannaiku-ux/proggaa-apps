@@ -50,7 +50,7 @@ class NotificationWorker(context: Context, params: WorkerParameters) : Coroutine
                 Notifications.show(
                     applicationContext,
                     key = n.optString("id"),
-                    title = n.optString("title", "Proggaa"),
+                    title = n.optString("title", "Prooggaa"),
                     body = n.optString("body"),
                     link = n.optString("url").ifBlank { null },
                 )

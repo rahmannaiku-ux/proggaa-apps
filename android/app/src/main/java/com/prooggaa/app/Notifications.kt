@@ -50,7 +50,7 @@ object Notifications {
         val notification = NotificationCompat.Builder(context, CHANNEL_GENERAL)
             .setSmallIcon(R.drawable.ic_stat_proggaa)
             .setColor(ContextCompat.getColor(context, R.color.proggaa_primary))
-            .setContentTitle("Proggaa $version is ready")
+            .setContentTitle("Prooggaa $version is ready")
             .setContentText(text)
             .setStyle(NotificationCompat.BigTextStyle().bigText(text))
             .setContentIntent(pending)

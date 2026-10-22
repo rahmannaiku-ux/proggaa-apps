@@ -36,6 +36,8 @@ new release. A release is only needed when the app itself changes (updater, noti
   of checkout. Free missions can still be joined in the app.
 - **No landing page:** the apps open at `/dashboard`, which goes to the login screen when signed out. The site sends
   the apps from `/` to `/login` (or `/dashboard` when signed in), so they never show the marketing home page.
+- **Website-only pages:** certificate verification (`/certificates/verify`) always opens in the normal browser,
+  never inside the apps (both apps check every address; the site also sends its own links there).
 - **Offline:** the Windows app opens on a small local page (`desktop/dist/index.html`) that waits for a connection
   before opening the site. Android shows an offline screen with **Try again**.
 
@@ -48,6 +50,16 @@ its signature matches the public key in `tauri.conf.json`. The person is asked f
 website's style (`dist/update.html`: what's new, the version jump, "Update now" / "Later", then a progress bar), and the
 installer closes, updates and reopens the app. That window is the only one allowed to call the app's update commands
 (`capabilities/updater.json`).
+
+**No Windows title bar (1.1.1+):** the page goes right to the top of the window, so the app looks like one surface.
+The site draws the minimise / maximise / close buttons (`proggaa://window/minimize`, `/maximize`, `/close`, caught in
+`on_navigation`) and marks its top bar `-webkit-app-region: drag`, so it moves the window and double-click maximises.
+The start page draws the same buttons. The window-state plugin never restores the old frame.
+
+**Links and files:** links to other sites open in the normal browser (the opener plugin's own link handler is off: it
+needs a permission the site must not have, and swallowed the click). Files the site hands over are saved to Downloads
+under their own name (never over another file) and opened with the PC's app; site pages opened with
+`target="_blank"` (a PDF) open in a second app window.
 
 ### Android (`android/`)
 
@@ -66,6 +78,9 @@ It is built to feel like a native app rather than a website in a frame:
 - **Quieter loading**: no progress bar for quick page changes, no scroll bars or edge glow, no tap flashes or text
   selection on buttons (the site adds these touches when it sees the app).
 
+- **Back:** goes back a page, but on Home it leaves the app, and it never goes back to a sign-in screen.
+- **Files the page makes itself** (`blob:` / `data:` links, like the birthday card) are read out of the page by the app
+  and saved to Downloads; normal downloads use Android's download manager.
 - `MainActivity.kt`: the web view, file and video picking for uploads (reels, photos, assignments), downloads through
   Android's download manager (with the session cookie), full-screen video, the back button, the offline screen, edge-to-edge
   layout that keeps clear of the keyboard, and opening the page a notification points to.

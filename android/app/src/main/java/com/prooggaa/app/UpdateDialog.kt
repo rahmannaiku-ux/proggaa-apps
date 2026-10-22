@@ -75,7 +75,7 @@ class UpdateDialog(
         }, wrap().apply { topMargin = dp(4) })
 
         content.addView(TextView(activity).apply {
-            text = "A fresh Proggaa is here!"
+            text = "A fresh Prooggaa is here!"
             setTextColor(ink)
             textSize = 22f
             typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)

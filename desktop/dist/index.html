@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Proggaa</title>
+  <title>Prooggaa</title>
   <style>
     :root { color-scheme: light; }
     html, body { height: 100%; margin: 0; }
@@ -20,17 +20,28 @@
       margin-top: 18px; padding: 10px 22px; border: 2px solid #1f1433; border-radius: 14px; box-shadow: 3px 3px 0 #1f1433;
       background: #53328b; color: #fff; font: inherit; font-weight: 700; cursor: pointer;
     }
+    /* No Windows title bar: drag anywhere along the top, and our own window buttons. */
+    .titlebar { position: fixed; inset: 0 0 auto 0; height: 36px; display: flex; justify-content: flex-end; -webkit-app-region: drag; }
+    .titlebar a { -webkit-app-region: no-drag; width: 46px; display: grid; place-items: center; color: #1f1433; }
+    .titlebar a:hover { background: rgba(31, 20, 51, 0.08); }
+    .titlebar a.close:hover { background: #c42b1c; color: #fff; }
+    .titlebar svg { width: 10px; height: 10px; }
     .dots::after { content: ""; animation: dots 1.2s steps(4) infinite; }
     @keyframes dots { 0% { content: ""; } 25% { content: "."; } 50% { content: ".."; } 75% { content: "..."; } }
   </style>
 </head>
 <body>
+  <div class="titlebar">
+    <a href="proggaa://window/minimize" title="Minimise" aria-label="Minimise"><svg viewBox="0 0 10 10"><path d="M0 5h10" stroke="currentColor" /></svg></a>
+    <a href="proggaa://window/maximize" title="Maximise" aria-label="Maximise"><svg viewBox="0 0 10 10"><rect x="0.5" y="0.5" width="9" height="9" fill="none" stroke="currentColor" /></svg></a>
+    <a href="proggaa://window/close" class="close" title="Close" aria-label="Close"><svg viewBox="0 0 10 10"><path d="M0 0l10 10M10 0L0 10" stroke="currentColor" /></svg></a>
+  </div>
   <main>
-    <img src="logo.png" alt="Proggaa" />
-    <div id="connecting"><p class="dots">Opening Proggaa</p></div>
+    <img src="logo.png" alt="Prooggaa" />
+    <div id="connecting"><p class="dots">Opening Prooggaa</p></div>
     <div id="offline">
       <p><strong style="color:#1f1433">You're offline</strong></p>
-      <p>Proggaa needs the internet. It will open as soon as you're connected.</p>
+      <p>Prooggaa needs the internet. It will open as soon as you're connected.</p>
       <button type="button" id="retry">Try again</button>
     </div>
   </main>

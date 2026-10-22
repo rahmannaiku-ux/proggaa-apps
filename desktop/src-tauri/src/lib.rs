@@ -9,11 +9,12 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde::Serialize;
-use tauri::webview::NewWindowResponse;
+use tauri::webview::{DownloadEvent, NewWindowResponse};
 use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_opener::OpenerExt;
 use tauri_plugin_updater::{Update, UpdaterExt};
+use tauri_plugin_window_state::StateFlags;
 use url::Url;
 
 /// The update found by the last check, waiting for the person to choose in the update window.
@@ -49,31 +50,48 @@ const CHECK_EVERY: Duration = Duration::from_secs(6 * 60 * 60);
 /// When a check couldn't reach GitHub (offline at start-up...), try again this soon.
 const RETRY_AFTER: Duration = Duration::from_secs(2 * 60);
 
-/// The title bar's colour: the site's sidebar purple (#271643, as 0x00BBGGRR),
-/// so the top of the window reads as part of the app rather than a black strip.
-#[cfg(windows)]
-const TITLE_BAR_COLOR: u32 = 0x0043_1627;
-
-/// Paints the Windows title bar in the sidebar's purple with white text
-/// (Windows 11; older Windows keeps a dark title bar).
-#[cfg(windows)]
-fn paint_title_bar(window: &tauri::WebviewWindow) {
-    use windows_sys::Win32::Graphics::Dwm::{
-        DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
-    };
-    let Ok(hwnd) = window.hwnd() else { return };
-    let set = |attribute: i32, value: u32| unsafe {
-        DwmSetWindowAttribute(hwnd.0 as _, attribute as _, &value as *const u32 as _, 4);
-    };
-    // Light minimise/maximise/close buttons, whatever the Windows theme.
-    set(DWMWA_USE_IMMERSIVE_DARK_MODE as i32, 1);
-    set(DWMWA_CAPTION_COLOR as i32, TITLE_BAR_COLOR);
-    set(DWMWA_BORDER_COLOR as i32, TITLE_BAR_COLOR);
-    set(DWMWA_TEXT_COLOR as i32, 0x00FF_FFFF);
+/// The window has no Windows title bar: the site (and the start page) draw
+/// the minimise / maximise / close buttons, as links the app catches:
+/// `proggaa://window/minimize`, `.../maximize` (toggles), `.../close`.
+pub fn window_action(url: &Url) -> Option<&'static str> {
+    if url.scheme() != "proggaa" || url.host_str() != Some("window") {
+        return None;
+    }
+    match url.path().trim_matches('/') {
+        "minimize" => Some("minimize"),
+        "maximize" => Some("maximize"),
+        "close" => Some("close"),
+        _ => None,
+    }
 }
 
+fn do_window_action(window: &tauri::WebviewWindow, action: &str) {
+    let _ = match action {
+        "minimize" => window.minimize(),
+        "maximize" if window.is_maximized().unwrap_or(false) => window.unmaximize(),
+        "maximize" => window.maximize(),
+        _ => window.close(),
+    };
+}
+
+/// Without a title bar Windows 11 still draws a thin light frame line; the
+/// page's own edge looks cleaner.
+#[cfg(windows)]
+fn hide_frame_line(window: &tauri::WebviewWindow) {
+    use windows_sys::Win32::Graphics::Dwm::{DwmSetWindowAttribute, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE};
+    let Ok(hwnd) = window.hwnd() else { return };
+    let none: u32 = DWMWA_COLOR_NONE;
+    unsafe {
+        DwmSetWindowAttribute(hwnd.0 as _, DWMWA_BORDER_COLOR as _, &none as *const u32 as _, 4);
+    }
+}
+
+/// Pages of the site that belong on the website, not in the app (checking a
+/// certificate is done in the browser, where it can be shared and trusted).
+const WEBSITE_ONLY: &[&str] = &["/certificates/verify"];
+
 /// Where the app's own window may go. Anything else (YouTube, Facebook, a
-/// link in a post...) opens in the person's normal browser instead.
+/// link in a post, a website-only page...) opens in the person's normal browser instead.
 pub fn opens_in_app(url: &Url) -> bool {
     match url.scheme() {
         // The bundled start page, and in-page things the site creates itself.
@@ -82,11 +100,30 @@ pub fn opens_in_app(url: &Url) -> bool {
         _ => return false,
     }
     let host = url.host_str().unwrap_or_default();
+    let site = host == "prooggaa.com" || host.ends_with(".prooggaa.com");
+    if site && WEBSITE_ONLY.iter().any(|p| url.path() == *p || url.path().starts_with(&format!("{p}/"))) {
+        return false;
+    }
     host == "tauri.localhost"
-        || host == "prooggaa.com"
-        || host.ends_with(".prooggaa.com")
+        || site
         // Admins and mentors connecting Google Drive / Docs sign in to Google and come back.
         || host == "accounts.google.com"
+}
+
+/// `dir/name`, or `dir/name (2).ext`... when that is taken, so a download never replaces a file.
+pub fn free_path(dir: &std::path::Path, name: &str) -> std::path::PathBuf {
+    let name = std::path::Path::new(name).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "download".into());
+    let (stem, ext) = match name.rfind('.') {
+        Some(i) if i > 0 => (&name[..i], &name[i..]),
+        _ => (name.as_str(), ""),
+    };
+    let mut candidate = dir.join(&name);
+    let mut n = 2;
+    while candidate.exists() {
+        candidate = dir.join(format!("{stem} ({n}){ext}"));
+        n += 1;
+    }
+    candidate
 }
 
 /// The browser identity the site sees: an ordinary Edge on Windows, plus a
@@ -108,9 +145,16 @@ pub fn run() {
                 let _ = window.set_focus();
             }
         }))
-        .plugin(tauri_plugin_window_state::Builder::default().build())
+        // Size and position are remembered; the frame never comes back from an older version's saved state.
+        .plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::all() - StateFlags::DECORATIONS)
+                .build(),
+        )
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_opener::init())
+        // Links are opened by on_navigation / on_new_window below. The plugin's own click handler
+        // would ask for a permission the site doesn't have (and mustn't), and swallow the click.
+        .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingUpdate::default())
         .invoke_handler(tauri::generate_handler![update_info, start_update, dismiss_update])
@@ -121,17 +165,24 @@ pub fn run() {
             let popup_handle = handle.clone();
 
             let main = WebviewWindowBuilder::new(app, "main", WebviewUrl::App("index.html".into()))
-                .title("Proggaa")
+                .title("Prooggaa")
                 // Opens maximized the first time; after that the window-state plugin
                 // brings back the size and position it was closed at.
                 .inner_size(1200.0, 760.0)
                 .min_inner_size(420.0, 560.0)
                 .center()
                 .maximized(true)
+                .decorations(false)
                 .user_agent(&user_agent(&version))
                 .on_navigation(move |url| {
                     if let Some(target) = browser_target(url) {
                         let _ = nav_handle.opener().open_url(target, None::<&str>);
+                        return false;
+                    }
+                    if let Some(action) = window_action(url) {
+                        if let Some(window) = nav_handle.get_webview_window("main") {
+                            do_window_action(&window, action);
+                        }
                         return false;
                     }
                     if url.as_str().starts_with(CHECK_UPDATE_URL) {
@@ -147,6 +198,23 @@ pub fn run() {
                     }
                     false
                 })
+                // Files the site hands over (a certificate, a resource): saved to Downloads under
+                // their own name (never over another file), then opened with the PC's own app.
+                .on_download(|webview, event| {
+                    match event {
+                        DownloadEvent::Requested { destination, .. } => {
+                            if let Ok(dir) = webview.app_handle().path().download_dir() {
+                                let name = destination.file_name().map(|n| n.to_os_string()).unwrap_or_else(|| "download".into());
+                                *destination = free_path(&dir, &name.to_string_lossy());
+                            }
+                        }
+                        DownloadEvent::Finished { path: Some(path), success: true, .. } => {
+                            let _ = webview.app_handle().opener().open_path(path.to_string_lossy(), None::<&str>);
+                        }
+                        _ => {}
+                    }
+                    true
+                })
                 // target="_blank" links and window.open: pages of the site (a full-size picture,
                 // a file) open in a second app window that shares the sign-in; the rest in the browser.
                 .on_new_window(move |url, _features| {
@@ -160,7 +228,7 @@ pub fn run() {
                 })
                 .build()?;
             #[cfg(windows)]
-            paint_title_bar(&main);
+            hide_frame_line(&main);
             #[cfg(not(windows))]
             let _ = main;
 
@@ -202,7 +270,7 @@ async fn check_for_update(app: &AppHandle, manual: bool) -> bool {
                 ask(
                     app,
                     "No update",
-                    format!("You have the latest version of Proggaa ({version})."),
+                    format!("You have the latest version of Prooggaa ({version})."),
                     MessageDialogButtons::Ok,
                     MessageDialogKind::Info,
                 )
@@ -240,7 +308,7 @@ fn show_update_window(app: &AppHandle) {
         return;
     }
     let built = WebviewWindowBuilder::new(app, UPDATE_WINDOW, WebviewUrl::App("update.html".into()))
-        .title("Update Proggaa")
+        .title("Update Prooggaa")
         .inner_size(400.0, 500.0)
         .resizable(false)
         .maximizable(false)
@@ -353,6 +421,9 @@ mod tests {
         assert!(!opens("https://evilprooggaa.com/"));
         assert!(!opens("mailto:hi@prooggaa.com"));
         assert!(!opens("proggaa://update"));
+        assert!(!opens("https://prooggaa.com/certificates/verify/PRG-AAAA-BBBB-CCCC"));
+        assert!(!opens("https://prooggaa.com/certificates/verify?id=x"));
+        assert!(opens("https://prooggaa.com/certificates/verifying-soon"));
     }
 
     #[test]
@@ -371,5 +442,28 @@ mod tests {
     #[test]
     fn tags_the_user_agent() {
         assert!(user_agent("1.2.3").ends_with("ProggaaDesktop/1.2.3"));
+    }
+
+    #[test]
+    fn downloads_never_replace_a_file() {
+        let dir = std::env::temp_dir().join(format!("proggaa-dl-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        assert_eq!(free_path(&dir, "PRG-1.pdf"), dir.join("PRG-1.pdf"));
+        std::fs::write(dir.join("PRG-1.pdf"), b"x").unwrap();
+        assert_eq!(free_path(&dir, "PRG-1.pdf"), dir.join("PRG-1 (2).pdf"));
+        assert_eq!(free_path(&dir, "..\\..\\evil.exe"), dir.join("evil.exe"));
+        assert_eq!(free_path(&dir, ""), dir.join("download"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn reads_window_buttons() {
+        let action = |u: &str| window_action(&Url::parse(u).unwrap());
+        assert_eq!(action("proggaa://window/minimize"), Some("minimize"));
+        assert_eq!(action("proggaa://window/maximize"), Some("maximize"));
+        assert_eq!(action("proggaa://window/close"), Some("close"));
+        assert_eq!(action("proggaa://window/explode"), None);
+        assert_eq!(action("proggaa://update"), None);
+        assert_eq!(action("https://prooggaa.com/window/close"), None);
     }
 }

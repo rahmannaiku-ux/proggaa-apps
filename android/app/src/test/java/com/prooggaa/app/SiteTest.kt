@@ -69,6 +69,25 @@ class SiteTest {
     }
 
     @Test
+    fun websiteOnlyPages() {
+        assertTrue(Site.isWebsiteOnly("https://prooggaa.com/certificates/verify/PRG-AAAA-BBBB-CCCC"))
+        assertTrue(Site.isWebsiteOnly("https://www.prooggaa.com/certificates/verify?id=x"))
+        assertFalse(Site.isWebsiteOnly("https://prooggaa.com/certificates/verifying"))
+        assertFalse(Site.isWebsiteOnly("https://prooggaa.com/medals"))
+        assertFalse(Site.isWebsiteOnly("https://evil.example/certificates/verify"))
+        assertFalse(Site.isWebsiteOnly(null))
+    }
+
+    @Test
+    fun signInPages() {
+        assertTrue(Site.isSignInPage("/login"))
+        assertTrue(Site.isSignInPage("/register/verify"))
+        assertFalse(Site.isSignInPage("/dashboard"))
+        assertFalse(Site.isSignInPage("/loginhelp"))
+        assertFalse(Site.isSignInPage(null))
+    }
+
+    @Test
     fun pathsOfAddresses() {
         assertEquals("/community/u/x", Site.pathOf("https://prooggaa.com/community/u/x?y=1"))
         assertEquals("/", Site.pathOf("https://prooggaa.com"))
