@@ -19,7 +19,7 @@ import androidx.core.graphics.ColorUtils
 
 /**
  * The app's own tab bar along the bottom, drawn natively in the site's style:
- * an ink line on top, and the selected tab in a yellow pill (like the site's
+ * a hairline on top, and the selected tab in a yellow pill (like the site's
  * bottom bar), with unread badges. Tapping a tab switches page stacks;
  * tapping the open one goes back to its first page.
  */
@@ -34,7 +34,7 @@ class TabBar(
     private var selected = 0
     private var ink = ContextCompat.getColor(context, R.color.proggaa_ink)
     private var muted = ContextCompat.getColor(context, R.color.proggaa_muted_ink)
-    private val topLine = GradientDrawable().apply { setColor(ink) }
+    private val topLine = GradientDrawable().apply { setColor(ColorUtils.setAlphaComponent(ink, 40)) }
 
     private class Item(val root: FrameLayout, val pill: View, val icon: ImageView, val label: TextView, val badge: TextView)
 
@@ -123,14 +123,14 @@ class TabBar(
         val dark = ColorUtils.calculateLuminance(color) < 0.4
         ink = if (dark) Color.WHITE else ContextCompat.getColor(context, R.color.proggaa_ink)
         muted = if (dark) Color.argb(170, 255, 255, 255) else ContextCompat.getColor(context, R.color.proggaa_muted_ink)
-        topLine.setColor(ink)
+        topLine.setColor(ColorUtils.setAlphaComponent(ink, 40))
         items.forEach { (it.pill.background as GradientDrawable).setStroke(dp(2), ContextCompat.getColor(context, R.color.proggaa_ink)) }
         select(selected)
     }
 
     override fun dispatchDraw(canvas: android.graphics.Canvas) {
         super.dispatchDraw(canvas)
-        topLine.setBounds(0, 0, width, dp(2))
+        topLine.setBounds(0, 0, width, maxOf(1, dp(1)))
         topLine.draw(canvas)
     }
 

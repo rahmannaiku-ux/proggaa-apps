@@ -16,6 +16,8 @@ object Site {
     const val CHECK_UPDATE_URL = "proggaa://update"
     /** The site's "Notification settings" button: turn notifications on. */
     const val NOTIFICATIONS_URL = "proggaa://notifications"
+    /** Sent by the site (1.2.0+) right after the person switches light/dark mode: recolour the bars. */
+    const val THEME_URL = "proggaa://theme"
 
     /**
      * `proggaa://browser?url=<https address>`: the site asks for a page to open in

@@ -280,6 +280,11 @@ class MainActivity : ComponentActivity() {
                     turnOnNotifications()
                     return true
                 }
+                if (url.startsWith(Site.THEME_URL)) {
+                    // Give the page a moment to repaint in the new colours, then match the bars to it.
+                    view.postDelayed({ matchBarsToPage() }, 150)
+                    return true
+                }
                 if (request.isForMainFrame && Site.isWebsiteOnly(url)) {
                     openInBrowser(url)
                     return true
