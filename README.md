@@ -56,10 +56,12 @@ The site draws the minimise / maximise / close buttons (`proggaa://window/minimi
 `on_navigation`) and marks its top bar `-webkit-app-region: drag`, so it moves the window and double-click maximises.
 The start page draws the same buttons. The window-state plugin never restores the old frame.
 
-**Video full screen (1.2.1+):** WebView2 only fills the web view with a full-screen element, so on its own the
-taskbar and the window edges stayed around a full-screen video. The site sends `proggaa://window/fullscreen` and
-`/exit-fullscreen` when its player enters or leaves full screen, and the app makes the window itself full screen and
-puts it back. A full page load while full screen also puts the window back (the page can no longer say so).
+**Video full screen (1.2.2+):** WebView2 only fills the web view with a full-screen element, so on its own the
+taskbar and the window edges stayed around a full-screen video. The app listens to WebView2's
+`ContainsFullScreenElementChanged` (`follow_page_fullscreen`) and makes the window itself full screen and puts it
+back, like a browser. 1.2.1 relied on the site sending `proggaa://window/fullscreen`, which never arrived:
+`requestFullscreen` uses up the click's user gesture, so the link is dropped. The link is still understood. A full page
+load while full screen also puts the window back.
 
 **Links and files:** links to other sites open in the normal browser (the opener plugin's own link handler is off: it
 needs a permission the site must not have, and swallowed the click). Files the site hands over are saved to Downloads

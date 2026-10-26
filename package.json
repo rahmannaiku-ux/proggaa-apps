@@ -1,6 +1,6 @@
 {
   "name": "proggaa-apps",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "private": true,
   "description": "Proggaa for Windows and Android. This version number is the single source for both apps (see scripts/set-version.mjs).",
   "scripts": {
