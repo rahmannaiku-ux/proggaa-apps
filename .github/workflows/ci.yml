@@ -3,7 +3,7 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, fs-test]
   pull_request:
 
 permissions:
@@ -39,6 +39,11 @@ jobs:
         run: |
           npm ci
           npx tauri build --no-bundle
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proggaa-windows-exe
+          path: desktop/src-tauri/target/release/Proggaa.exe
+          retention-days: 3
 
   android:
     runs-on: ubuntu-latest

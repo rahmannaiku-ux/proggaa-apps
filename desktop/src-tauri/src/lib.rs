@@ -75,10 +75,68 @@ fn do_window_action(window: &tauri::WebviewWindow, action: &str) {
         "minimize" => window.minimize(),
         "maximize" if window.is_maximized().unwrap_or(false) => window.unmaximize(),
         "maximize" => window.maximize(),
-        "fullscreen" => window.set_fullscreen(true),
-        "exit-fullscreen" => window.set_fullscreen(false),
+        "fullscreen" => Ok(set_window_fullscreen(window, true)),
+        "exit-fullscreen" => Ok(set_window_fullscreen(window, false)),
         _ => window.close(),
     };
+}
+
+/// How the window looked before a video made it full screen, to put it back.
+#[derive(Clone, Copy)]
+struct Restore {
+    maximized: bool,
+    position: tauri::PhysicalPosition<i32>,
+    size: tauri::PhysicalSize<u32>,
+}
+
+#[derive(Default)]
+struct FullscreenState(Mutex<Option<Restore>>);
+
+/// Full screen for a video. The window has no title bar and usually starts
+/// maximized, and Tauri's own full screen goes wrong from that state (tauri#11788,
+/// tao#1087): the window covered the screen but the page kept the maximized
+/// size, leaving a black band where the taskbar was. So the window is first
+/// un-maximized. PROGGAA_FS_MODE (testing only) picks: "unmax" (default),
+/// "plain" (Tauri full screen as is) or "manual" (cover the monitor by hand).
+fn set_window_fullscreen(window: &tauri::WebviewWindow, on: bool) {
+    let mode = std::env::var("PROGGAA_FS_MODE").unwrap_or_else(|_| "unmax".into());
+    let Some(state) = window.try_state::<FullscreenState>() else { return };
+    let mut saved = state.0.lock().unwrap();
+    if on {
+        if saved.is_some() {
+            return;
+        }
+        let maximized = window.is_maximized().unwrap_or(false);
+        let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else { return };
+        *saved = Some(Restore { maximized, position, size });
+        if mode != "plain" && maximized {
+            let _ = window.unmaximize();
+        }
+        if mode == "manual" {
+            if let Ok(Some(monitor)) = window.current_monitor() {
+                let _ = window.set_position(*monitor.position());
+                let _ = window.set_size(*monitor.size());
+            }
+        } else {
+            let _ = window.set_fullscreen(true);
+        }
+    } else {
+        let Some(back) = saved.take() else { return };
+        if mode != "manual" {
+            let _ = window.set_fullscreen(false);
+        }
+        if back.maximized {
+            let _ = window.maximize();
+        } else {
+            let _ = window.set_size(back.size);
+            let _ = window.set_position(back.position);
+        }
+    }
+}
+
+/// The window is full screen for a video right now.
+fn in_video_fullscreen(window: &tauri::WebviewWindow) -> bool {
+    window.try_state::<FullscreenState>().is_some_and(|s| s.0.lock().unwrap().is_some())
 }
 
 /// Without a title bar Windows 11 still draws a thin light frame line; the
@@ -111,7 +169,7 @@ fn follow_page_fullscreen(window: &tauri::WebviewWindow) {
                 let mut on = Default::default();
                 sender.ContainsFullScreenElement(&mut on)?;
                 if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.set_fullscreen(on.as_bool());
+                    set_window_fullscreen(&window, on.as_bool());
                 }
                 Ok(())
             })),
@@ -191,6 +249,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::Builder::new().open_js_links_on_click(false).build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(PendingUpdate::default())
+        .manage(FullscreenState::default())
         .invoke_handler(tauri::generate_handler![update_info, start_update, dismiss_update])
         .setup(|app| {
             let handle = app.handle().clone();
@@ -228,8 +287,8 @@ pub fn run() {
                         // A full page load ends the page's video full screen without the page
                         // getting to say so (it is gone), so the window goes back here.
                         if let Some(window) = nav_handle.get_webview_window("main") {
-                            if window.is_fullscreen().unwrap_or(false) {
-                                let _ = window.set_fullscreen(false);
+                            if in_video_fullscreen(&window) {
+                                set_window_fullscreen(&window, false);
                             }
                         }
                         return true;
@@ -272,6 +331,13 @@ pub fn run() {
             hide_frame_line(&main);
             #[cfg(windows)]
             follow_page_fullscreen(&main);
+            // Testing only: PROGGAA_TEST_PAGE=data:text/html,... opens a local test page instead of the
+            // site (data: pages only, so it can never point the app somewhere else).
+            if let Some(page) = std::env::var("PROGGAA_TEST_PAGE").ok().and_then(|p| Url::parse(&p).ok()) {
+                if page.scheme() == "data" {
+                    let _ = main.navigate(page);
+                }
+            }
             #[cfg(not(windows))]
             let _ = main;
 
