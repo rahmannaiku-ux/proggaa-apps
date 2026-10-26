@@ -96,10 +96,10 @@ struct FullscreenState(Mutex<Option<Restore>>);
 /// maximized, and Tauri's own full screen goes wrong from that state (tauri#11788,
 /// tao#1087): the window covered the screen but the page kept the maximized
 /// size, leaving a black band where the taskbar was. So the window is first
-/// un-maximized. PROGGAA_FS_MODE (testing only) picks: "unmax" (default),
-/// "plain" (Tauri full screen as is) or "manual" (cover the monitor by hand).
+/// un-maximized, and maximized again afterwards. Measured on a 1920x1080 screen
+/// at 125%: maximized-then-full-screen left the page at 1536x816; un-maximizing
+/// first gives the full 1536x864, and Esc brings back the maximized window.
 fn set_window_fullscreen(window: &tauri::WebviewWindow, on: bool) {
-    let mode = std::env::var("PROGGAA_FS_MODE").unwrap_or_else(|_| "unmax".into());
     let Some(state) = window.try_state::<FullscreenState>() else { return };
     let mut saved = state.0.lock().unwrap();
     if on {
@@ -109,22 +109,13 @@ fn set_window_fullscreen(window: &tauri::WebviewWindow, on: bool) {
         let maximized = window.is_maximized().unwrap_or(false);
         let (Ok(position), Ok(size)) = (window.outer_position(), window.outer_size()) else { return };
         *saved = Some(Restore { maximized, position, size });
-        if mode != "plain" && maximized {
+        if maximized {
             let _ = window.unmaximize();
         }
-        if mode == "manual" {
-            if let Ok(Some(monitor)) = window.current_monitor() {
-                let _ = window.set_position(*monitor.position());
-                let _ = window.set_size(*monitor.size());
-            }
-        } else {
-            let _ = window.set_fullscreen(true);
-        }
+        let _ = window.set_fullscreen(true);
     } else {
         let Some(back) = saved.take() else { return };
-        if mode != "manual" {
-            let _ = window.set_fullscreen(false);
-        }
+        let _ = window.set_fullscreen(false);
         if back.maximized {
             let _ = window.maximize();
         } else {

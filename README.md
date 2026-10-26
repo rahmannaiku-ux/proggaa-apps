@@ -61,7 +61,13 @@ taskbar and the window edges stayed around a full-screen video. The app listens 
 `ContainsFullScreenElementChanged` (`follow_page_fullscreen`) and makes the window itself full screen and puts it
 back, like a browser. 1.2.1 relied on the site sending `proggaa://window/fullscreen`, which never arrived:
 `requestFullscreen` uses up the click's user gesture, so the link is dropped. The link is still understood. A full page
-load while full screen also puts the window back.
+load while full screen also puts the window back. 1.2.2 still left a black band: Tauri's full screen from a maximized
+window without a title bar keeps the page at the maximized size (tauri#11788), so 1.2.3 un-maximizes first
+(`set_window_fullscreen`) and maximizes again on exit.
+
+**Testing the Windows app:** CI uploads the built `Proggaa.exe` (artifact `proggaa-windows-exe`). Started with
+`PROGGAA_TEST_PAGE=data:text/html,...` it opens that local page instead of the site (only `data:` pages are accepted),
+so window behaviour can be checked without signing in.
 
 **Links and files:** links to other sites open in the normal browser (the opener plugin's own link handler is off: it
 needs a permission the site must not have, and swallowed the click). Files the site hands over are saved to Downloads
