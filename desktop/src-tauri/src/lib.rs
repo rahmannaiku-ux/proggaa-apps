@@ -53,6 +53,9 @@ const RETRY_AFTER: Duration = Duration::from_secs(2 * 60);
 /// The window has no Windows title bar: the site (and the start page) draw
 /// the minimise / maximise / close buttons, as links the app catches:
 /// `proggaa://window/minimize`, `.../maximize` (toggles), `.../close`.
+/// `.../fullscreen` and `.../exit-fullscreen` (1.2.1+) come from the site when a
+/// video goes full screen: WebView2 only fills the web view with it, so the
+/// window itself has to cover the whole screen (taskbar included) meanwhile.
 pub fn window_action(url: &Url) -> Option<&'static str> {
     if url.scheme() != "proggaa" || url.host_str() != Some("window") {
         return None;
@@ -61,6 +64,8 @@ pub fn window_action(url: &Url) -> Option<&'static str> {
         "minimize" => Some("minimize"),
         "maximize" => Some("maximize"),
         "close" => Some("close"),
+        "fullscreen" => Some("fullscreen"),
+        "exit-fullscreen" => Some("exit-fullscreen"),
         _ => None,
     }
 }
@@ -70,6 +75,8 @@ fn do_window_action(window: &tauri::WebviewWindow, action: &str) {
         "minimize" => window.minimize(),
         "maximize" if window.is_maximized().unwrap_or(false) => window.unmaximize(),
         "maximize" => window.maximize(),
+        "fullscreen" => window.set_fullscreen(true),
+        "exit-fullscreen" => window.set_fullscreen(false),
         _ => window.close(),
     };
 }
@@ -191,6 +198,13 @@ pub fn run() {
                         return false;
                     }
                     if opens_in_app(url) {
+                        // A full page load ends the page's video full screen without the page
+                        // getting to say so (it is gone), so the window goes back here.
+                        if let Some(window) = nav_handle.get_webview_window("main") {
+                            if window.is_fullscreen().unwrap_or(false) {
+                                let _ = window.set_fullscreen(false);
+                            }
+                        }
                         return true;
                     }
                     if matches!(url.scheme(), "http" | "https" | "mailto" | "tel") {
@@ -462,6 +476,8 @@ mod tests {
         assert_eq!(action("proggaa://window/minimize"), Some("minimize"));
         assert_eq!(action("proggaa://window/maximize"), Some("maximize"));
         assert_eq!(action("proggaa://window/close"), Some("close"));
+        assert_eq!(action("proggaa://window/fullscreen"), Some("fullscreen"));
+        assert_eq!(action("proggaa://window/exit-fullscreen"), Some("exit-fullscreen"));
         assert_eq!(action("proggaa://window/explode"), None);
         assert_eq!(action("proggaa://update"), None);
         assert_eq!(action("https://prooggaa.com/window/close"), None);
