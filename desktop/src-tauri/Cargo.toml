@@ -25,6 +25,8 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
 [target.'cfg(windows)'.dependencies]
+# The same version Tauri's wry uses (see Cargo.lock): needed to hear WebView2's full-screen event.
+webview2-com = "0.39"
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Graphics_Dwm"] }
 
 [profile.release]

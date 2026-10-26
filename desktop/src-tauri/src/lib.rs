@@ -93,6 +93,33 @@ fn hide_frame_line(window: &tauri::WebviewWindow) {
     }
 }
 
+/// A video (any element) the page puts in full screen only fills the web view:
+/// WebView2 leaves the window as it is, so the taskbar and the window edges stay
+/// around it. Browsers make their window full screen at that moment; so does this.
+/// It follows WebView2's own event, so it works whatever the page does, and the
+/// site's `proggaa://window/fullscreen` link (1.2.1) is only a second way in.
+#[cfg(windows)]
+fn follow_page_fullscreen(window: &tauri::WebviewWindow) {
+    use webview2_com::ContainsFullScreenElementChangedEventHandler;
+    let app = window.app_handle().clone();
+    let _ = window.with_webview(move |webview| unsafe {
+        let Ok(core) = webview.controller().CoreWebView2() else { return };
+        let mut token = 0i64;
+        let _ = core.add_ContainsFullScreenElementChanged(
+            &ContainsFullScreenElementChangedEventHandler::create(Box::new(move |sender, _| {
+                let Some(sender) = sender else { return Ok(()) };
+                let mut on = Default::default();
+                sender.ContainsFullScreenElement(&mut on)?;
+                if let Some(window) = app.get_webview_window("main") {
+                    let _ = window.set_fullscreen(on.as_bool());
+                }
+                Ok(())
+            })),
+            &mut token,
+        );
+    });
+}
+
 /// Pages of the site that belong on the website, not in the app (checking a
 /// certificate is done in the browser, where it can be shared and trusted).
 const WEBSITE_ONLY: &[&str] = &["/certificates/verify"];
@@ -243,6 +270,8 @@ pub fn run() {
                 .build()?;
             #[cfg(windows)]
             hide_frame_line(&main);
+            #[cfg(windows)]
+            follow_page_fullscreen(&main);
             #[cfg(not(windows))]
             let _ = main;
 
